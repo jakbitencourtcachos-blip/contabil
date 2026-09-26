@@ -1,0 +1,27 @@
+https://supabase.com/dashboard/project/bvzcrhfkeaoizrwmjrun
+senha banco de dados supabaseJ@k992529210
+NEXT_PUBLIC_SUPABASE_URL=https://bvzcrhfkeaoizrwmjrun.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_aY5RnxYh20ZEVxg4MkJv_A_0AtnbOSC
+db.bvzcrhfkeaoizrwmjrun.supabase.co
+
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "supabase": {
+      "type": "remote",
+      "url": "https://mcp.supabase.com/mcp?project_ref=bvzcrhfkeaoizrwmjrun&features=docs%2Caccount%2Cdatabase%2Cdebugging%2Cdevelopment%2Cfunctions%2Cbranching",
+      "enabled": true
+    }
+  }
+}
+
+opencode mcp auth supabase
+npx skills add supabase/agent-skills
+
+https://bvzcrhfkeaoizrwmjrun.supabase.co
+sb_publishable_aY5RnxYh20ZEVxg4MkJv_A_0AtnbOSC
+sb_secret_0VpeAAt3li3Fi-rWJNxSwQ_MXbgGi1g
+https://bvzcrhfkeaoizrwmjrun.supabase.co/auth/v1/.well-known/jwks.json
+
+token git hub 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
+GitHub https://github.com/jakbitencourtcachos-blip/contabil.git
