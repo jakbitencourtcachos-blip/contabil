@@ -55,7 +55,8 @@ const state = {
     lastResult: null,      // retorno do n8n (resumo + word)
     editingUserId: null,
     abortController: null,
-    processingTimer: null
+    processingTimer: null,
+    passwordRecoveryPending: false
 };
 
 /* --- Atalhos de DOM ------------------------------------------------------- */
@@ -141,6 +142,85 @@ async function handleLogin(event) {
     if (error) return showLoginError(mensagemAuth(error));
     toast('Bem-vindo ao painel!');
     // O listener onAuthStateChange cuida da entrada no painel
+}
+
+async function requestPasswordRecovery() {
+    const emailInput = $('#login-email');
+    const email = emailInput.value.trim();
+    showLoginError('');
+    if (!email) {
+        showLoginError('Informe seu e-mail para receber o link de recuperação.');
+        emailInput.focus();
+        return;
+    }
+    if (!emailInput.checkValidity()) {
+        showLoginError('Informe um endereço de e-mail válido.');
+        emailInput.focus();
+        return;
+    }
+
+    const button = $('#forgot-password-btn');
+    button.disabled = true;
+    button.textContent = 'Enviando solicitação...';
+    const { error } = await db.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin
+    });
+    button.disabled = false;
+    button.textContent = 'Esqueci minha senha';
+
+    if (error) return showLoginError(mensagemAuth(error));
+    toast('Se houver uma conta cadastrada para esse e-mail, você receberá o link para redefinir a senha.');
+}
+
+function openPasswordRecoveryModal(session) {
+    if (session) state.session = session;
+    state.passwordRecoveryPending = true;
+    $('#login-screen').classList.remove('hidden');
+    $('#app-shell').classList.add('hidden');
+    $('#password-recovery-modal').classList.remove('hidden');
+    $('#password-recovery-modal').classList.add('flex');
+}
+
+async function handlePasswordRecoverySubmit(event) {
+    event.preventDefault();
+    const password = $('#recovery-password').value;
+    const confirmation = $('#recovery-password-confirm').value;
+    const errorBox = $('#password-recovery-error');
+    errorBox.classList.add('hidden');
+
+    if (password.length < 8) {
+        errorBox.textContent = 'A senha precisa ter pelo menos 8 caracteres.';
+        errorBox.classList.remove('hidden');
+        return;
+    }
+    if (password !== confirmation) {
+        errorBox.textContent = 'As senhas não conferem.';
+        errorBox.classList.remove('hidden');
+        return;
+    }
+
+    const button = $('#password-recovery-submit');
+    button.disabled = true;
+    button.textContent = 'Salvando senha...';
+    const { error } = await db.auth.updateUser({ password });
+    button.disabled = false;
+    button.textContent = 'Salvar nova senha';
+
+    if (error) {
+        errorBox.textContent = mensagemAuth(error);
+        errorBox.classList.remove('hidden');
+        return;
+    }
+
+    state.passwordRecoveryPending = false;
+    $('#password-recovery-modal').classList.add('hidden');
+    $('#password-recovery-modal').classList.remove('flex');
+    $('#password-recovery-form').reset();
+    history.replaceState(null, '', location.pathname + location.search);
+    await db.auth.signOut();
+    state.session = null;
+    showScreen('login');
+    toast('Senha alterada com sucesso. Entre usando sua nova senha.');
 }
 
 function mensagemAuth(error) {
@@ -331,7 +411,7 @@ function navigate(screen, opts = {}) {
 
 /** Botões voltar/avançar do navegador + edição manual do #hash. */
 function voltarParaTelaDoHistory() {
-    if (!state.session) return;
+    if (!state.session || state.passwordRecoveryPending) return;
     const hash = (location.hash || '').replace('#', '');
     const alvo = SCREENS.includes(hash) ? hash : telaSalva();
     if (alvo === state.screen) return;
@@ -1642,6 +1722,7 @@ function toast(message, tipo = '') {
  * ======================================================================== */
 document.addEventListener('DOMContentLoaded', async () => {
     applyInitialTheme();
+    const recoveryInUrl = new URLSearchParams(location.hash.replace(/^#/, '')).get('type') === 'recovery';
 
     // Toggle de tema nas duas telas (login e painel)
     $('#theme-toggle')?.addEventListener('click', toggleTheme);
@@ -1651,6 +1732,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     setupDropzone();
     $('#login-form').addEventListener('submit', handleLogin);
+    $('#forgot-password-btn').addEventListener('click', requestPasswordRecovery);
+    $('#password-recovery-form').addEventListener('submit', handlePasswordRecoverySubmit);
     $('#user-form').addEventListener('submit', handleUserSubmit);
     $('#user-tipo-acesso').addEventListener('change', atualizarCamposAcessoUsuario);
     $('#user-perfil').addEventListener('change', atualizarCamposAcessoUsuario);
@@ -1658,22 +1741,35 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!e.target.closest('#user-menu') && !e.target.closest('[onclick*="toggleUserMenu"]')) toggleUserMenu(false);
     });
 
+    // Escuta eventos antes de obter a sessão para capturar PASSWORD_RECOVERY.
+    db.auth.onAuthStateChange((event, session) => {
+        if (event === 'PASSWORD_RECOVERY' && session) {
+            openPasswordRecoveryModal(session);
+            return;
+        }
+        if (event === 'SIGNED_IN' && session) {
+            queueMicrotask(async () => {
+                if (state.passwordRecoveryPending) return;
+                await enterApp(session);
+                showLoginError('');
+            });
+        }
+        if (event === 'SIGNED_OUT') showScreen('login');
+    });
+
     // Estado inicial da autenticação
     const { data: { session } } = await db.auth.getSession();
-    if (session) {
+    if (recoveryInUrl || state.passwordRecoveryPending) {
+        if (session) openPasswordRecoveryModal(session);
+        else {
+            showScreen('login');
+            showLoginError('O link de recuperação expirou ou já foi usado. Solicite um novo.');
+        }
+    } else if (session) {
         await enterApp(session);
     } else {
         showScreen('login');
     }
-
-    // Escuta de login/logout (inclusive em outra aba)
-    db.auth.onAuthStateChange(async (event, session) => {
-        if (event === 'SIGNED_IN' && session) {
-            await enterApp(session);
-            showLoginError('');
-        }
-        if (event === 'SIGNED_OUT') showScreen('login');
-    });
 
     paintWebhookBadge();
 
