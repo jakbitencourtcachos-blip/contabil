@@ -161,15 +161,35 @@ async function requestPasswordRecovery() {
 
     const button = $('#forgot-password-btn');
     button.disabled = true;
-    button.textContent = 'Enviando solicitação...';
-    const { error } = await db.auth.resetPasswordForEmail(email, {
-        redirectTo: window.location.origin
-    });
-    button.disabled = false;
-    button.textContent = 'Esqueci minha senha';
+    button.textContent = 'Verificando e enviando...';
+    try {
+        const { data: cadastrado, error: consultaError } = await db.rpc('email_cadastrado', {
+            p_email: email
+        });
+        if (consultaError) {
+            console.error('[email_cadastrado]', consultaError.message);
+            return showLoginError('Não foi possível consultar o cadastro. Tente novamente mais tarde.');
+        }
+        if (!cadastrado) return showLoginError('E-mail não cadastrado.');
 
-    if (error) return showLoginError(mensagemAuth(error));
-    toast('Se houver uma conta cadastrada para esse e-mail, você receberá o link para redefinir a senha.');
+        const { error } = await db.auth.resetPasswordForEmail(email, {
+            redirectTo: window.location.origin
+        });
+        if (error) {
+            const mensagem = (error.message || '').toLowerCase();
+            if (mensagem.includes('rate limit') || mensagem.includes('too many')) {
+                return showLoginError('Muitas solicitações de recuperação. Aguarde alguns minutos e tente novamente.');
+            }
+            return showLoginError(mensagemAuth(error));
+        }
+        toast('Email de recuperação enviado. Verifique sua caixa de entrada.');
+    } catch (error) {
+        console.error('[recuperação de senha]', error);
+        showLoginError('Não foi possível enviar o email agora. Tente novamente mais tarde.');
+    } finally {
+        button.disabled = false;
+        button.textContent = 'Esqueci minha senha';
+    }
 }
 
 function openPasswordRecoveryModal(session) {

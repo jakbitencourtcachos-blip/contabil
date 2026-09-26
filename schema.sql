@@ -57,6 +57,21 @@ $$;
 revoke all on function public.consumir_credito() from public;
 grant execute on function public.consumir_credito() to authenticated;
 
+-- Consulta se um e-mail existe no Auth para a tela de recuperação de senha.
+-- SECURITY DEFINER permite consultar sem login; a função retorna somente boolean.
+create or replace function public.email_cadastrado(p_email text)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+    select coalesce(nullif(btrim(p_email), ''), '') <> ''
+       and exists (
+           select 1 from auth.users u
+           where lower(u.email) = lower(btrim(p_email))
+       );
+$$;
+revoke all on function public.email_cadastrado(text) from public;
+grant execute on function public.email_cadastrado(text) to anon, authenticated;
+
 -- 2) TABELA DE PROCESSOS (consultas salvas no Dashboard) ----------------------
 create table if not exists public.processos (
     id              uuid primary key default gen_random_uuid(),
