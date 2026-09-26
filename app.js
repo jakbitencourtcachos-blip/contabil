@@ -47,6 +47,7 @@ const state = {
     session: null,
     profile: null,
     isAdmin: false,
+    screen: null,           // tela atualmente aberta (dashboard/novo/config)
     processos: [],
     users: [],
     webhookUrl: '',
@@ -159,8 +160,11 @@ async function logout() {
     state.session = null;
     state.profile = null;
     state.isAdmin = false;
+    state.screen = null;
     state.processos = [];
     state.users = [];
+    localStorage.removeItem(SCREEN_KEY);          // próxima entrada começa no Dashboard
+    history.replaceState(null, '', location.pathname + location.search);
     showScreen('login');
     toast('Sessão encerrada com sucesso.');
 }
@@ -220,6 +224,10 @@ async function enterApp(session) {
     if (state.isAdmin) await loadUsers();
 }
 
+/** Telas do painel — usadas para restaurar a última página visitada. */
+const SCREENS = ['dashboard', 'novo', 'config'];
+const SCREEN_KEY = 'analia:tela-atual';
+
 function showScreen(which) {
     const login = $('#login-screen');
     const shell = $('#app-shell');
@@ -230,20 +238,36 @@ function showScreen(which) {
     } else {
         login.classList.add('hidden');
         shell.classList.remove('hidden');
-        navigate('dashboard');
+        // Restaura a última tela aberta (hash > localStorage > dashboard)
+        navigate(telaSalva(), { silent: true });
     }
+}
+
+/** Qual tela reabrir: prioriza o #hash da URL, depois o último acesso. */
+function telaSalva() {
+    const hash = (location.hash || '').replace('#', '');
+    if (SCREENS.includes(hash)) return hash;
+    const salva = localStorage.getItem(SCREEN_KEY);
+    return SCREENS.includes(salva) ? salva : 'dashboard';
 }
 
 /* =============================================================================
  * 5. NAVEGAÇÃO ENTRE TELAS
+ * -----------------------------------------------------------------------------
+ * Cada troca de tela é gravada em localStorage e no #hash da URL, então:
+ *   - recarregar a página / voltar de outra aba devolve a mesma tela;
+ *   - os botões "voltar/avançar" do navegador funcionam entre as telas.
  * ======================================================================== */
-function navigate(screen) {
+function navigate(screen, opts = {}) {
     if (!state.session && screen !== 'login') return showScreen('login');
 
+    let redirecionada = false;
     if (screen === 'config' && !state.isAdmin) {
         toast('Área restrita ao Administrador.', 'erro');
         screen = 'dashboard';
+        redirecionada = true;
     }
+    if (!SCREENS.includes(screen)) screen = 'dashboard';
 
     $$('.screen').forEach(s => s.classList.add('hidden'));
     const target = $('#screen-' + screen);
@@ -259,10 +283,28 @@ function navigate(screen) {
     const link = document.querySelector(`.nav-link[data-nav="${screen}"]`);
     if (link) link.classList.add('text-violet-600', 'dark:text-violet-400', 'font-semibold');
 
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    state.screen = screen;
+    localStorage.setItem(SCREEN_KEY, screen);
+
+    if (!opts.silent) {
+        const destino = '#' + screen;
+        if (redirecionada) history.replaceState({ screen }, '', destino);
+        else if (location.hash !== destino) history.pushState({ screen }, '', destino);
+    }
+
+    if (!opts.noScroll) window.scrollTo({ top: 0, behavior: 'smooth' });
 
     if (screen === 'dashboard') loadProcessos();
     if (screen === 'config' && state.isAdmin) { loadWebhookUrl(); loadUsers(); }
+}
+
+/** Botões voltar/avançar do navegador + edição manual do #hash. */
+function voltarParaTelaDoHistory() {
+    if (!state.session) return;
+    const hash = (location.hash || '').replace('#', '');
+    const alvo = SCREENS.includes(hash) ? hash : telaSalva();
+    if (alvo === state.screen) return;
+    navigate(alvo, { silent: true, noScroll: true });
 }
 
 function toggleMobileMenu() { $('#mobile-menu').classList.toggle('hidden'); }
@@ -664,55 +706,235 @@ async function parseN8nResponse(response) {
     try { return JSON.parse(texto); } catch (e) { return { resumo: texto }; }
 }
 
-/**
- * Normaliza os formatos mais comuns de retorno do n8n:
- *   { resumo, arquivo_base64 } | { resumo, file_url } | { data: {...} } | attachments[]
- */
-function normalizeN8nResponse(raw) {
-    let data = raw;
-    if (data && typeof data === 'object' && data.data && typeof data.data === 'object') data = data.data;
+/* -----------------------------------------------------------------------------
+ * Leitura FLEXÍVEL do retorno do n8n.
+ * O fluxo pode devolver o Word de vários jeitos (base64 em qualquer campo,
+ * data:URI, URL, binaryData do n8n, attachments, JSON embutido em string...).
+ * Em vez de depender de nomes fixos, varremos a RESPOSTA INTEIRA em qualquer
+ * profundidade procurando o documento.
+ * -------------------------------------------------------------------------- */
 
-    const resumo = pick(data, ['resumo', 'summary', 'resultado', 'analise', 'texto', 'descricao', 'answer', 'resposta']);
-    const dados  = pick(data, ['dados', 'campos', 'valores', 'informacoes', 'calculos', 'bases', 'tabela', 'items']);
-
-    // Word em base64
-    let base64 = pick(data, ['arquivo_base64', 'docx_base64', 'word_base64', 'file_base64', 'documento_base64', 'arquivoWord', 'base64']);
-    if (!base64 && Array.isArray(data?.attachments)) {
-        const att = data.attachments.find(a => a && (a.data || a.base64 || a.content));
-        if (att) base64 = att.data || att.base64 || att.content;
+/** Desembrulha strings que são JSON e envelopamentos comuns (body/data/payload). */
+function unwrapPayload(raw, nivel = 0) {
+    let valor = raw;
+    if (typeof valor === 'string') {
+        const s = valor.trim();
+        if ((s.startsWith('{') && s.endsWith('}')) || (s.startsWith('[') && s.endsWith(']'))) {
+            try { valor = JSON.parse(s); } catch (e) { return valor; }
+        } else {
+            return valor;
+        }
     }
-
-    // Word por URL
-    let url = pick(data, ['file_url', 'arquivo_url', 'docx_url', 'word_url', 'download_url', 'link']);
-    if (!url) {
-        const u = pick(data, ['url']);
-        if (u && /docx|word|download|storage|blob/i.test(String(u))) url = u;
+    if (valor && typeof valor === 'object' && !Array.isArray(valor) && nivel < 3) {
+        const chaves = Object.keys(valor);
+        for (const k of ['body', 'payload', 'result', 'response', 'output']) {
+            if (valor[k] !== undefined && chaves.length <= 3) return unwrapPayload(valor[k], nivel + 1);
+        }
+        // { "data": {...} } do n8n — desce só se não houver mais nada útil aqui
+        const uteis = chaves.filter(c => !['data', 'statusCode', 'headers', 'meta'].includes(c));
+        if (valor.data !== undefined && uteis.length === 0) return unwrapPayload(valor.data, nivel + 1);
     }
-
-    const nomeArquivo = pick(data, ['file_name', 'arquivo_nome', 'docx_nome', 'fileName', 'nome_arquivo']) || 'analise-processo.docx';
-
-    return {
-        resumo: typeof resumo === 'string' ? resumo : (resumo ? jsonToText(resumo) : 'Análise processada pelo n8n.'),
-        dados: dados || null,
-        dadosBrutos: data,
-        base64: typeof base64 === 'string' ? base64 : null,
-        url: typeof url === 'string' ? url : null,
-        nomeArquivo
-    };
+    return valor;
 }
 
-function pick(obj, keys) {
-    if (!obj || typeof obj !== 'object') return undefined;
-    for (const k of keys) {
-        if (obj[k] !== undefined && obj[k] !== null && obj[k] !== '') return obj[k];
+/** Coleta todos os pares {chave, valor} string da resposta (profundidade ≤ 8). */
+function flattenStrings(no, caminho, saida, nivel) {
+    if (nivel > 8 || saida.length > 5000) return;
+
+    if (Array.isArray(no)) {
+        no.forEach((item, i) => flattenStrings(item, `${caminho}[${i}]`, saida, nivel + 1));
+        return;
+    }
+    if (no && typeof no === 'object') {
+        for (const [k, v] of Object.entries(no)) {
+            flattenStrings(v, caminho ? `${caminho}.${k}` : k, saida, nivel + 1);
+        }
+        return;
+    }
+    if (typeof no === 'string') {
+        const chave = (caminho.split('.').pop() || '').replace(/\[\d+\]$/, '');
+        saida.push({ chave, caminho, valor: no });
+
+        // string que esconde um JSON → varre também
+        const s = no.trim();
+        if (nivel < 6 && s.length < 300000 &&
+            ((s.startsWith('{') && s.endsWith('}')) || (s.startsWith('[') && s.endsWith(']')))) {
+            try { flattenStrings(JSON.parse(s), `${caminho}(json)`, saida, nivel + 1); } catch (e) { /* não é JSON */ }
+        }
+    }
+}
+
+/** Identifica o tipo do arquivo pelo começo dos bytes (assina mágica). */
+function detectarTipoBinario(base64) {
+    try {
+        // aceita base64 comum e URL-safe (usa - e _ no lugar de + e /)
+        const limpo = String(base64).replace(/\s/g, '').replace(/-/g, '+').replace(/_/g, '/');
+        if (!limpo || limpo.startsWith('data:')) return null;
+        const corte = Math.floor(limpo.length / 4) * 4;   // atob exige múltiplo de 4
+        if (corte < 4) return null;
+        const bin = atob(limpo.slice(0, corte));
+        if (bin.startsWith('PK')) return 'docx';                                    // .docx é um ZIP
+        if (bin.charCodeAt(0) === 0xD0 && bin.charCodeAt(1) === 0xCF) return 'doc'; // OLE (Word 97)
+        if (bin.startsWith('%PDF')) return 'pdf';
+        if (bin.startsWith('GIF8')) return 'gif';
+        if (bin.charCodeAt(0) === 0xFF && bin.charCodeAt(1) === 0xD8) return 'jpg';
+        if (bin.charCodeAt(0) === 0x89 && bin.startsWith('PNG')) return 'png';
+        return null;
+    } catch (e) {
+        return null;
+    }
+}
+
+const MIME_ARQUIVO = {
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    doc:  'application/msword',
+    pdf:  'application/pdf'
+};
+
+/** Procura o arquivo (Word/PDF) em qualquer canto da resposta. */
+function procurarArquivo(itens) {
+    let base64 = null, url = null, nome = null, ext = '.docx';
+
+    for (const { chave, valor } of itens) {
+        const k = chave.toLowerCase();
+        const v = valor;
+        if (!v || typeof v !== 'string') continue;
+
+        // nome de arquivo, quando o n8n devolve um
+        if (!nome && /(file_?name|arquivo_?nome|nome_?arquivo|docx_?nome)/i.test(k) && /\.(docx|doc|pdf)$/i.test(v)) {
+            nome = v;
+        }
+
+        // 1) data:URI  ("data:application/vnd...;base64,XXXX")
+        if (!base64 && v.startsWith('data:')) {
+            const m = v.match(/^data:([^;,]*);base64,([\s\S]*)$/);
+            if (m) {
+                const mime = m[1] || '';
+                const tipo = /word|officedocument|msword/i.test(mime) ? 'docx'
+                    : (/pdf/i.test(mime) ? 'pdf' : detectarTipoBinario(m[2]));
+                if (tipo) {
+                    base64 = m[2].replace(/\s/g, '');
+                    ext = '.' + tipo;
+                    if (!nome) nome = `analise-processo.${tipo}`;
+                }
+            }
+        }
+
+        // 2) base64 puro em qualquer campo (confere a assina mágica do arquivo)
+        if (!base64 && v.length >= 500 && v.length <= 25000000 && /^[A-Za-z0-9+/=\-_\s]+$/.test(v)) {
+            const tipo = detectarTipoBinario(v);
+            const campoDeArquivo = /(docx|word|arquivo|file|documento|binary|anexo|attachment|output|download|base64|blob|conteudo|content)/i.test(k);
+            if (tipo === 'docx' || tipo === 'doc' || tipo === 'pdf' || (!tipo && /(docx|word)/i.test(k))) {
+                base64 = v.replace(/\s/g, '');
+                ext = '.' + (tipo || 'docx');
+                if (!nome) nome = `analise-processo${ext}`;
+            } else if (!tipo && campoDeArquivo && v.length > 5000) {
+                console.warn('[n8n] string grande em campo de arquivo, mas a assina não bate:', k);
+            }
+        }
+
+        // 3) URL de download (absoluta, assinada ou caminho relativo do n8n)
+        if (!url && v.length < 4000) {
+            const relativo = /^\/[\w\-./]+\.(docx|doc|pdf)(\?.*)?$/i.test(v);
+            const absoluta = /^(https?:\/\/|s3:\/\/)/i.test(v);
+            if (relativo && state.webhookUrl) {
+                try { url = new URL(v, state.webhookUrl).href; } catch (e) { url = v; }
+            } else if (absoluta) {
+                const pareceArquivo = /(\.docx|\.doc|\.pdf)(\?|$)/i.test(v) ||
+                    /(download|object|storage|file|arquivo|word|docx|blob|signed|x-amz|signature|expires|tempurl|minio)/i.test(v) ||
+                    /(url|link|href)/i.test(k);
+                const eExterna = /(jwks|auth\/v1|supabase\.co\/rest|googleapis\.com\/identity)/i.test(v);
+                if (pareceArquivo && !eExterna) url = v;
+            }
+        }
+    }
+
+    return { base64, url, nome, ext };
+}
+
+/** Procura um texto por nome de chave (em qualquer profundidade). */
+function acharTexto(itens, chaves) {
+    for (const alvo of chaves) {
+        const achado = itens.find(it => it.chave.toLowerCase() === alvo && it.valor && it.valor.trim());
+        if (achado) return achado.valor;
+    }
+    return null;
+}
+
+/** Procura um valor (objeto/lista/string) por nome de chave, recursivamente. */
+function acharValor(no, chaves, nivel = 0) {
+    if (!no || typeof no !== 'object' || nivel > 6) return undefined;
+    for (const alvo of chaves) {
+        if (no[alvo] !== undefined && no[alvo] !== null && no[alvo] !== '') return no[alvo];
+    }
+    for (const v of Object.values(no)) {
+        if (v && typeof v === 'object') {
+            const achado = acharValor(v, chaves, nivel + 1);
+            if (achado !== undefined) return achado;
+        }
     }
     return undefined;
 }
 
-function jsonToText(obj) {
-    if (Array.isArray(obj)) return obj.map(v => (typeof v === 'object' ? jsonToText(v) : String(v))).join('\n');
-    if (typeof obj !== 'object') return String(obj);
-    return Object.entries(obj).map(([k, v]) => `• ${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n');
+/** Se ninguém chamou o campo de "resumo", usa o maior texto plausível. */
+function resumoAutomatico(itens) {
+    const candidatos = itens.filter(it => {
+        const v = it.valor;
+        if (v.length < 40 || v.length > 15000) return false;
+        if (v.length >= 400 && /^[A-Za-z0-9+/=\r\n]+$/.test(v)) return false;   // base64 (sem espaços)
+        if (/^https?:\/\//i.test(v)) return false;                        // URL
+        if (/^(SELECT|INSERT|CREATE|function |const |<\?|<!doctype)/i.test(v)) return false;
+        return /[a-záéíóúãõç]{4,}/i.test(v);                              // tem texto de verdade
+    });
+    if (!candidatos.length) return null;
+    candidatos.sort((a, b) => b.valor.length - a.valor.length);
+    return candidatos[0].valor;
+}
+
+/** Mostra no painel o que sobrou da resposta (campos/bases calculadas). */
+function dadosFallback(data) {
+    if (!data || typeof data !== 'object') return null;
+    const ignorar = /^(resumo|summary|resultado|analise|texto|descricao|answer|resposta|message|msg|success|statuscode|status|chave|webhook_url)$/i;
+    const saida = {};
+    for (const [k, v] of Object.entries(data)) {
+        if (ignorar.test(k)) continue;
+        if (typeof v === 'string' && (v.length > 3000 || /^https?:/i.test(v))) continue;
+        saida[k] = v;
+    }
+    return Object.keys(saida).length ? saida : null;
+}
+
+/**
+ * Normaliza o retorno do n8n de qualquer formato para:
+ *   { resumo, dados, base64, url, mime, nomeArquivo, chaves, dadosBrutos }
+ */
+function normalizeN8nResponse(raw) {
+    console.log('[n8n] resposta bruta:', raw);
+
+    const data = unwrapPayload(raw);
+    const itens = [];
+    flattenStrings(data, '', itens, 0);
+
+    const resumoTxt = acharTexto(itens, [
+        'resumo', 'summary', 'resultado', 'analise', 'texto', 'descricao',
+        'answer', 'resposta', 'conclusao', 'parecer', 'explicacao'
+    ]) || resumoAutomatico(itens);
+
+    const dados = acharValor(data, ['dados', 'campos', 'valores', 'informacoes', 'calculos', 'bases', 'tabela', 'items', 'detalhes', 'resultados']);
+
+    const arq = procurarArquivo(itens);
+    const ext = (arq.ext || '.docx').replace('.', '');
+
+    return {
+        resumo: resumoTxt || 'Análise processada pelo n8n.',
+        dados: dados !== undefined ? dados : dadosFallback(data),
+        dadosBrutos: data,
+        base64: arq.base64 || null,
+        url: arq.url || null,
+        mime: MIME_ARQUIVO[ext] || MIME_ARQUIVO.docx,
+        nomeArquivo: arq.nome || `analise-processo.${ext}`,
+        chaves: (data && typeof data === 'object') ? Object.keys(data) : []
+    };
 }
 
 /** Renderiza os "dados/bases" devolvidos (tabela chave-valor ou lista). */
@@ -738,6 +960,31 @@ function showResult(r) {
     $('#result-resumo').textContent = r.resumo || '—';
     $('#result-dados').innerHTML = renderDados(r.dados);
     $('#result-saved').classList.add('hidden');
+
+    // Resposta bruta (depuração) — mostra exatamente o que o n8n devolveu
+    const raw = $('#result-raw-json');
+    if (raw) {
+        let bruto;
+        try {
+            bruto = JSON.stringify(r.dadosBrutos, null, 2) || String(r.dadosBrutos);
+        } catch (e) {
+            bruto = String(r.dadosBrutos);
+        }
+        raw.textContent = bruto.length > 60000 ? bruto.slice(0, 60000) + '\n… (truncado)' : bruto;
+    }
+    const aviso = $('#result-aviso');
+    if (aviso) {
+        if (!r.base64 && !r.url) {
+            aviso.classList.remove('hidden');
+            aviso.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-amber-500 mr-1.5"></i>
+                O n8n respondeu, mas não encontrei o arquivo na resposta. Chaves recebidas:
+                <code class="text-violet-600 dark:text-violet-400">${esc((r.chaves || []).join(', ') || '(objeto vazio)')}</code>.
+                Abra a "Resposta bruta" abaixo e me envie o conteúdo que eu ajusto a leitura.`;
+        } else {
+            aviso.classList.add('hidden');
+        }
+    }
+
     $('#result-panel').classList.remove('hidden');
     $('#result-panel').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
@@ -799,9 +1046,10 @@ function downloadWordFromResult() {
     const r = state.lastResult;
     if (!r) return toast('Nenhum resultado disponível.', 'erro');
 
-    if (r.base64) return downloadBase64Word(r.base64, r.nomeArquivo);
+    if (r.base64) return downloadBase64Word(r.base64, r.nomeArquivo, r.mime);
     if (r.url) return openExternal(r.url, r.nomeArquivo);
-    toast('O n8n não devolveu o arquivo Word (use "arquivo_base64" ou "file_url").', 'erro');
+
+    toast(`O n8n respondeu mas não devolveu o arquivo. Chaves: ${(r.chaves || []).join(', ') || '(vazio)'}. Abra a resposta bruta e me envie.`, 'erro');
 }
 
 async function downloadWord(id) {
@@ -819,20 +1067,22 @@ async function downloadWord(id) {
     if (p.docx_url) return openExternal(p.docx_url, p.docx_nome || 'analise.docx');
     // 4) Guardado no JSON bruto do n8n
     const r = p.resposta ? normalizeN8nResponse(p.resposta) : null;
-    if (r?.base64) return downloadBase64Word(r.base64, r.nomeArquivo);
+    if (r?.base64) return downloadBase64Word(r.base64, r.nomeArquivo, r.mime);
     if (r?.url) return openExternal(r.url, r.nomeArquivo);
 
     toast('Arquivo Word não disponível para este processo.', 'erro');
 }
 
-function downloadBase64Word(base64, nome) {
-    const blob = base64ToBlob(base64, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+function downloadBase64Word(base64, nome, mime) {
+    const ext = String(nome || '').split('.').pop().toLowerCase();
+    const tipo = mime || MIME_ARQUIVO[ext] || MIME_ARQUIVO.docx;
+    const blob = base64ToBlob(base64, tipo);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = nome || 'analise-processo.docx';
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
-    toast('Download do arquivo Word iniciado.');
+    toast('Download do arquivo iniciado.');
 }
 
 function openExternal(url, nome) {
@@ -845,6 +1095,25 @@ function openExternal(url, nome) {
 /* =============================================================================
  * 10. PERSISTÊNCIA NO SUPABASE (upload dos arquivos + registro do processo)
  * ======================================================================== */
+
+/** Troca strings base64 enormes por um marcador (o arquivo já está salvo). */
+function semBase64Pesado(valor, nivel = 0) {
+    if (nivel > 8) return valor;
+    if (typeof valor === 'string') {
+        if (valor.length > 20000 && /^[A-Za-z0-9+/=\s]+$/.test(valor)) {
+            return '[base64 do arquivo removido — ver docx_path / docx_base64]';
+        }
+        return valor;
+    }
+    if (Array.isArray(valor)) return valor.map(v => semBase64Pesado(v, nivel + 1));
+    if (valor && typeof valor === 'object') {
+        const saida = {};
+        for (const [k, v] of Object.entries(valor)) saida[k] = semBase64Pesado(v, nivel + 1);
+        return saida;
+    }
+    return valor;
+}
+
 /** Envia o arquivo ao Storage; retorna o path ou null (bucket inexistente). */
 async function uploadToStorage(file, path) {
     if (!file || !db.storage) return null;
@@ -896,7 +1165,7 @@ async function saveProcesso({ status, resumo, resposta, campos }) {
         registro.docx_url = r.url || null;
 
         if (r.base64) {
-            const blob = base64ToBlob(r.base64);
+            const blob = base64ToBlob(r.base64, r.mime);
             const docxPath = `${state.session.user.id}/${stamp}-${safeName(registro.docx_nome)}`;
             const saved = await uploadToStorage(blob, docxPath);
             if (saved) {
@@ -907,6 +1176,12 @@ async function saveProcesso({ status, resumo, resposta, campos }) {
                 toast('Word grande demais e sem bucket: não foi possível salvar a cópia.', 'erro');
             }
         }
+    }
+
+    // Com o arquivo já guardado, o base64 gigante sai do JSON `resposta`
+    // (senão a linha do banco fica com dezenas de MB e o insert falha).
+    if (registro.resposta && (registro.docx_path || registro.docx_base64 || registro.docx_url)) {
+        registro.resposta = semBase64Pesado(registro.resposta);
     }
 
     const { data, error } = await db.from('processos').insert(registro).select().single();
@@ -1280,4 +1555,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     paintWebhookBadge();
+
+    // Histórico do navegador: voltar/avançar entre as telas e manter a última
+    // tela aberta ao recarregar ou voltar para a aba do site.
+    window.addEventListener('popstate', voltarParaTelaDoHistory);
+    window.addEventListener('hashchange', voltarParaTelaDoHistory);
 });
