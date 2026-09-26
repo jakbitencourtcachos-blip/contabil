@@ -222,6 +222,7 @@
                                 <span id="menu-user-role"
                                       class="inline-flex items-center gap-1 mt-2 px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wide
                                              bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300">Usuário</span>
+                                <p id="menu-access-info" class="text-[11px] text-slate-500 dark:text-slate-400 mt-2"></p>
                             </div>
                             <button onclick="navigate('config'); toggleUserMenu();" id="menu-config-btn"
                                     class="hidden w-full text-left px-4 py-3 text-sm font-medium text-slate-600 dark:text-slate-300
@@ -701,9 +702,10 @@
                                 </table>
                             </div>
 
-                            <p class="text-[11px] text-slate-400 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
-                                <i class="fa-solid fa-circle-info mr-1"></i>
-                                Exclusão/alteração definitiva na autenticação usa a Edge Function <code>admin-users</code> (service role). Sem ela, o usuário é apenas inativado.
+                                <p class="text-[11px] text-slate-400 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+                                    <i class="fa-solid fa-circle-info mr-1"></i>
+                                    Créditos são descontados por análise enviada; o acesso por período permite análises até a data de validade. Em bases existentes, execute a versão atualizada de <code>schema.sql</code> no Supabase.
+                                    Exclusão definitiva na autenticação usa a Edge Function <code>admin-users</code> (service role).
                             </p>
                         </div>
                     </div>
@@ -777,7 +779,7 @@
 
     <!-- Modal: criar/editar usuário -->
     <div id="user-modal" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm hidden items-center justify-center p-4">
-        <div class="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full p-6 sm:p-8 relative shadow-2xl border border-slate-200 dark:border-slate-800 animate-fade-up">
+        <div class="bg-white dark:bg-slate-900 rounded-3xl max-h-[90vh] overflow-y-auto max-w-lg w-full p-6 sm:p-8 relative shadow-2xl border border-slate-200 dark:border-slate-800 animate-fade-up">
             <button onclick="closeUserModal()" class="absolute top-6 right-6 p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
                 <i class="fa-solid fa-xmark"></i>
             </button>
@@ -838,6 +840,32 @@
                     </div>
                 </div>
 
+                <div id="user-access-settings" class="space-y-3 rounded-2xl bg-violet-50/70 dark:bg-violet-950/20 border border-violet-100 dark:border-violet-900/50 p-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">Tipo de acesso</label>
+                        <select id="user-tipo-acesso" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-800 dark:text-white">
+                            <option value="creditos">Por créditos (1 por análise)</option>
+                            <option value="tempo">Por período de acesso</option>
+                        </select>
+                    </div>
+                    <div id="user-creditos-wrap">
+                        <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">Créditos disponíveis</label>
+                        <input type="number" id="user-creditos" min="0" step="1" value="0" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-800 dark:text-white">
+                        <p class="text-[10px] text-slate-400 mt-1">Cada análise enviada consome 1 crédito.</p>
+                    </div>
+                    <div id="user-periodo-wrap" class="hidden">
+                        <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">Conceder acesso por</label>
+                        <div class="grid grid-cols-2 gap-2">
+                            <input type="number" id="user-periodo-quantidade" min="1" step="1" value="1" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-800 dark:text-white">
+                            <select id="user-periodo-unidade" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-800 dark:text-white">
+                                <option value="dias">Dia(s)</option>
+                                <option value="meses">Mês(es)</option>
+                            </select>
+                        </div>
+                        <p id="user-periodo-atual" class="text-[10px] text-slate-400 mt-1"></p>
+                    </div>
+                </div>
+
                 <div class="flex gap-3 pt-3">
                     <button type="button" onclick="closeUserModal()"
                             class="flex-grow py-3 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700
@@ -864,6 +892,6 @@
     <script src="config.js"></script>
 
     <!-- Lógica da aplicação -->
-    <script src="app.js"></script>
+    <script src="app.js?v=20260926-3"></script>
 </body>
 </html>

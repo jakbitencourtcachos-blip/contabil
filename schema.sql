@@ -4,6 +4,8 @@
 -- Execute ESTE ARQUIVO UMA ÚNICA VEZ no Supabase Studio > SQL Editor > New query.
 -- Ele cria as tabelas usadas pelo frontend (processos, perfis, configuracoes),
 -- o bucket de Storage e as policies de segurança (RLS).
+-- Em instalações existentes, execute somente `migration-creditos.sql` para
+-- adicionar o controle de créditos e validade sem reaplicar o restante do schema.
 -- =============================================================================
 
 -- 1) TABELA DE PERFIS (Administrador x Usuário Padrão) ------------------------
@@ -13,8 +15,47 @@ create table if not exists public.perfis (
     email      text,
     perfil     text not null default 'usuario' check (perfil in ('admin','usuario')),
     ativo      boolean not null default true,
+    tipo_acesso text not null default 'creditos' check (tipo_acesso in ('creditos','tempo')),
+    creditos_saldo integer not null default 0 check (creditos_saldo >= 0),
+    acesso_expira_em timestamptz,
     created_at timestamptz not null default now()
 );
+
+-- Migração para instalações existentes: execute novamente este bloco ao
+-- atualizar uma base que já possua a tabela perfis.
+alter table public.perfis add column if not exists tipo_acesso text not null default 'creditos';
+alter table public.perfis add column if not exists creditos_saldo integer not null default 0;
+alter table public.perfis add column if not exists acesso_expira_em timestamptz;
+do $$ begin
+    alter table public.perfis add constraint perfis_tipo_acesso_check check (tipo_acesso in ('creditos','tempo'));
+exception when duplicate_object then null; end $$;
+do $$ begin
+    alter table public.perfis add constraint perfis_creditos_saldo_check check (creditos_saldo >= 0);
+exception when duplicate_object then null; end $$;
+
+-- Consome atomicamente um crédito antes de cada análise e valida a validade
+-- do plano. O usuário só pode consumir o próprio saldo.
+create or replace function public.consumir_credito()
+returns boolean
+language plpgsql security definer set search_path = public
+as $$
+declare p public.perfis%rowtype;
+begin
+    select * into p from public.perfis where id = auth.uid() for update;
+    if not found or not p.ativo then return false; end if;
+    if p.perfil = 'admin' then return true; end if;
+    if p.tipo_acesso = 'tempo' then
+        return p.acesso_expira_em is not null and p.acesso_expira_em > now();
+    end if;
+    if p.tipo_acesso = 'creditos' and p.creditos_saldo > 0 then
+        update public.perfis set creditos_saldo = creditos_saldo - 1 where id = p.id;
+        return true;
+    end if;
+    return false;
+end;
+$$;
+revoke all on function public.consumir_credito() from public;
+grant execute on function public.consumir_credito() to authenticated;
 
 -- 2) TABELA DE PROCESSOS (consultas salvas no Dashboard) ----------------------
 create table if not exists public.processos (

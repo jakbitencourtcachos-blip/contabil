@@ -139,6 +139,7 @@ async function handleLogin(event) {
     setLoginLoading(false);
 
     if (error) return showLoginError(mensagemAuth(error));
+    toast('Bem-vindo ao painel!');
     // O listener onAuthStateChange cuida da entrada no painel
 }
 
@@ -183,7 +184,10 @@ async function loadProfile(user) {
             nome: meta.nome || user.email.split('@')[0],
             email: user.email,
             perfil: meta.perfil || 'usuario',
-            ativo: true
+            ativo: false,
+            tipo_acesso: null,
+            creditos_saldo: 0,
+            acesso_expira_em: null
         };
         if (error) console.warn('[perfis] não foi possível ler a linha:', error.message);
     }
@@ -209,6 +213,18 @@ function paintUserInfo() {
         ? 'inline-flex items-center gap-1 mt-2 px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wide bg-violet-600 text-white'
         : 'inline-flex items-center gap-1 mt-2 px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wide bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300';
 
+    const accessInfo = $('#menu-access-info');
+    if (state.isAdmin) {
+        accessInfo.textContent = 'Acesso administrativo';
+    } else if (state.profile?.tipo_acesso === 'creditos') {
+        const saldo = Number(state.profile.creditos_saldo) || 0;
+        accessInfo.textContent = `${saldo} crédito${saldo === 1 ? '' : 's'} disponível${saldo === 1 ? '' : 'is'}`;
+    } else if (state.profile?.tipo_acesso === 'tempo' && state.profile.acesso_expira_em) {
+        accessInfo.textContent = `Acesso até ${new Date(state.profile.acesso_expira_em).toLocaleDateString('pt-BR')}`;
+    } else {
+        accessInfo.textContent = '';
+    }
+
     // Só o Administrador vê as Configurações
     $('#nav-config').classList.toggle('hidden', !state.isAdmin);
     $('#nav-config-mobile').classList.toggle('hidden', !state.isAdmin);
@@ -218,8 +234,23 @@ function paintUserInfo() {
 /** Entra no painel (após login ou ao restaurar sessão). */
 async function enterApp(session) {
     state.session = session;
-    showScreen('app');
     await loadProfile(session.user);
+    const profile = state.profile;
+    let bloqueio = '';
+    if (!profile || profile.ativo !== true) bloqueio = 'Seu acesso está inativo ou não foi configurado pelo administrador.';
+    else if (!state.isAdmin && profile.tipo_acesso === 'creditos' && Number(profile.creditos_saldo) <= 0) bloqueio = 'Seus créditos acabaram. Fale com o administrador para liberar mais créditos.';
+    else if (!state.isAdmin && profile.tipo_acesso === 'tempo' && (!profile.acesso_expira_em || new Date(profile.acesso_expira_em) <= new Date())) bloqueio = 'Seu período de acesso expirou. Fale com o administrador para renová-lo.';
+    else if (!state.isAdmin && !['creditos', 'tempo'].includes(profile.tipo_acesso)) bloqueio = 'Seu tipo de acesso não está configurado. Fale com o administrador.';
+
+    if (bloqueio) {
+        state.session = null;
+        await db.auth.signOut();
+        showScreen('login');
+        toast(bloqueio, 'erro');
+        return;
+    }
+
+    showScreen('app');
     await Promise.all([loadWebhookUrl(), loadProcessos()]);
     if (state.isAdmin) await loadUsers();
 }
@@ -243,12 +274,12 @@ function showScreen(which) {
     }
 }
 
-/** Qual tela reabrir: prioriza o #hash da URL, depois o último acesso. */
+/** Qual tela reabrir: prioriza a última tela salva; o hash é fallback. */
 function telaSalva() {
-    const hash = (location.hash || '').replace('#', '');
-    if (SCREENS.includes(hash)) return hash;
     const salva = localStorage.getItem(SCREEN_KEY);
-    return SCREENS.includes(salva) ? salva : 'dashboard';
+    if (SCREENS.includes(salva)) return salva;
+    const hash = (location.hash || '').replace('#', '');
+    return SCREENS.includes(hash) ? hash : 'dashboard';
 }
 
 /* =============================================================================
@@ -635,6 +666,21 @@ async function sendForAnalysis() {
 
     const form = $('#process-form');
     if (!form.reportValidity()) return;
+
+    const { data: acessoPermitido, error: acessoError } = await db.rpc('consumir_credito');
+    if (acessoError) {
+        console.error('[consumir_credito]', acessoError.message);
+        return toast('Não foi possível validar o acesso. O administrador precisa aplicar a atualização do schema.sql.', 'erro');
+    }
+    if (!acessoPermitido) {
+        return toast(state.profile?.tipo_acesso === 'creditos'
+            ? 'Créditos insuficientes. Fale com o administrador para liberar mais créditos.'
+            : 'Seu período de acesso expirou. Fale com o administrador para renová-lo.', 'erro');
+    }
+    if (!state.isAdmin && state.profile?.tipo_acesso === 'creditos') {
+        state.profile.creditos_saldo = Math.max(0, Number(state.profile.creditos_saldo) - 1);
+        paintUserInfo();
+    }
 
     const campos = {};
     ['cliente', 'documento', 'numero_processo', 'orgao', 'periodo', 'tipo_analise', 'email', 'telefone', 'observacoes']
@@ -1316,6 +1362,7 @@ function renderUsers() {
                     <i class="fa-solid ${u.ativo === false ? 'fa-circle-xmark' : 'fa-circle-check'} mr-1"></i>
                     ${u.ativo === false ? 'Inativo' : 'Ativo'}
                 </span>
+                <p class="text-[10px] text-slate-400 mt-1">${esc(resumoAcessoUser(u))}</p>
             </td>
             <td class="py-3 text-right whitespace-nowrap">
                 <button onclick="openUserModal('${u.id}')" class="p-2 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/40 transition-all" title="Editar">
@@ -1344,10 +1391,45 @@ function openUserModal(id) {
     $('#user-password-hint').textContent = user ? '(deixe vazio para manter)' : '(mín. 8 caracteres)';
     $('#user-perfil').value = user?.perfil || 'usuario';
     $('#user-ativo').value = String(user ? user.ativo !== false : true);
+    $('#user-tipo-acesso').value = user?.tipo_acesso || 'creditos';
+    $('#user-creditos').value = Number(user?.creditos_saldo) || 0;
+    $('#user-periodo-quantidade').value = '1';
+    $('#user-periodo-unidade').value = 'meses';
+    $('#user-periodo-atual').textContent = '';
+    if (user?.tipo_acesso === 'tempo' && user.acesso_expira_em) {
+        const restante = Math.ceil((new Date(user.acesso_expira_em) - new Date()) / 86400000);
+        if (restante > 0) {
+            $('#user-periodo-quantidade').value = String(restante);
+            $('#user-periodo-unidade').value = 'dias';
+            $('#user-periodo-atual').textContent = `Validade atual: ${new Date(user.acesso_expira_em).toLocaleString('pt-BR')}. Ao salvar, o prazo será contado novamente a partir de agora.`;
+        } else {
+            $('#user-periodo-atual').textContent = 'Acesso expirado. Informe um novo período para renovar.';
+        }
+    }
+    atualizarCamposAcessoUsuario();
 
     const modal = $('#user-modal');
     modal.classList.remove('hidden');
     modal.classList.add('flex');
+}
+
+function resumoAcessoUser(user) {
+    if (user.perfil === 'admin') return 'Acesso administrativo';
+    if (user.tipo_acesso === 'creditos') return `${Number(user.creditos_saldo) || 0} crédito(s)`;
+    if (user.tipo_acesso === 'tempo') {
+        return user.acesso_expira_em
+            ? `Até ${new Date(user.acesso_expira_em).toLocaleDateString('pt-BR')}`
+            : 'Período não definido';
+    }
+    return 'Acesso não configurado';
+}
+
+function atualizarCamposAcessoUsuario() {
+    const admin = $('#user-perfil').value === 'admin';
+    const porCreditos = $('#user-tipo-acesso').value === 'creditos';
+    $('#user-access-settings').classList.toggle('hidden', admin);
+    $('#user-creditos-wrap').classList.toggle('hidden', !porCreditos);
+    $('#user-periodo-wrap').classList.toggle('hidden', porCreditos);
 }
 
 function closeUserModal() {
@@ -1367,6 +1449,29 @@ async function handleUserSubmit(event) {
     const senha = $('#user-password').value;
     const perfil = $('#user-perfil').value;
     const ativo = $('#user-ativo').value === 'true';
+    const tipo_acesso = $('#user-tipo-acesso').value;
+    const creditosInformados = Number($('#user-creditos').value);
+    if (perfil !== 'admin' && tipo_acesso === 'creditos' && (!Number.isInteger(creditosInformados) || creditosInformados < 0)) {
+        return toast('Informe uma quantidade inteira de créditos igual ou maior que zero.', 'erro');
+    }
+    const creditos_saldo = perfil === 'admin' ? 0 : creditosInformados;
+    let acesso_expira_em = null;
+
+    if (perfil !== 'admin' && tipo_acesso === 'tempo') {
+        const quantidade = parseInt($('#user-periodo-quantidade').value, 10);
+        if (!Number.isInteger(quantidade) || quantidade < 1) return toast('Informe um período de acesso válido.', 'erro');
+        const validade = new Date();
+        if ($('#user-periodo-unidade').value === 'meses') {
+            const dia = validade.getDate();
+            validade.setDate(1);
+            validade.setMonth(validade.getMonth() + quantidade);
+            const ultimoDia = new Date(validade.getFullYear(), validade.getMonth() + 1, 0).getDate();
+            validade.setDate(Math.min(dia, ultimoDia));
+        } else {
+            validade.setDate(validade.getDate() + quantidade);
+        }
+        acesso_expira_em = validade.toISOString();
+    }
 
     if (!nome || !email) return toast('Preencha nome e e-mail.', 'erro');
 
@@ -1383,9 +1488,15 @@ async function handleUserSubmit(event) {
 
         const userId = data.user?.id;
         const { error: perfisError } = await db.from('perfis').insert({
-            id: userId, nome, email, perfil, ativo
+            id: userId, nome, email, perfil, ativo,
+            tipo_acesso: perfil === 'admin' ? 'creditos' : tipo_acesso,
+            creditos_saldo,
+            acesso_expira_em
         });
-        if (perfisError) console.warn('[perfis insert]', perfisError.message);
+        if (perfisError) {
+            console.error('[perfis insert]', perfisError.message);
+            return toast('Login criado, mas o perfil/acesso não foi salvo. Execute a atualização do schema.sql e confira as permissões do Supabase.', 'erro');
+        }
 
         toast('Usuário criado com sucesso!');
         closeUserModal();
@@ -1394,9 +1505,15 @@ async function handleUserSubmit(event) {
     }
 
     // ---------- EDITAR ----------
+    const userId = state.editingUserId;
     const { error } = await db.from('perfis')
-        .update({ nome, perfil, ativo })
-        .eq('id', state.editingUserId);
+        .update({
+            nome, perfil, ativo,
+            tipo_acesso: perfil === 'admin' ? 'creditos' : tipo_acesso,
+            creditos_saldo,
+            acesso_expira_em
+        })
+        .eq('id', userId);
 
     if (error) return toast('Erro ao atualizar: ' + error.message, 'erro');
 
@@ -1405,7 +1522,7 @@ async function handleUserSubmit(event) {
     toast('Usuário atualizado!');
     closeUserModal();
     loadUsers();
-    if (state.editingUserId === state.session?.user?.id) await loadProfile(state.session.user);
+    if (userId === state.session?.user?.id) await loadProfile(state.session.user);
 }
 
 async function deleteUser(id) {
@@ -1532,6 +1649,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupDropzone();
     $('#login-form').addEventListener('submit', handleLogin);
     $('#user-form').addEventListener('submit', handleUserSubmit);
+    $('#user-tipo-acesso').addEventListener('change', atualizarCamposAcessoUsuario);
+    $('#user-perfil').addEventListener('change', atualizarCamposAcessoUsuario);
     document.addEventListener('click', (e) => {
         if (!e.target.closest('#user-menu') && !e.target.closest('[onclick*="toggleUserMenu"]')) toggleUserMenu(false);
     });
@@ -1549,7 +1668,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (event === 'SIGNED_IN' && session) {
             await enterApp(session);
             showLoginError('');
-            toast('Bem-vindo ao painel!');
         }
         if (event === 'SIGNED_OUT') showScreen('login');
     });
@@ -1560,4 +1678,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     // tela aberta ao recarregar ou voltar para a aba do site.
     window.addEventListener('popstate', voltarParaTelaDoHistory);
     window.addEventListener('hashchange', voltarParaTelaDoHistory);
+    // Alguns navegadores restauram/reativam a página ao voltar de outra aba.
+    // Reaplica a última tela persistida sem criar uma nova entrada no histórico.
+    window.addEventListener('pageshow', () => {
+        if (state.session && SCREENS.includes(localStorage.getItem(SCREEN_KEY))) {
+            navigate(localStorage.getItem(SCREEN_KEY), { silent: true, noScroll: true });
+        }
+    });
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && state.session) {
+            const screen = localStorage.getItem(SCREEN_KEY);
+            if (SCREENS.includes(screen) && screen !== state.screen) {
+                navigate(screen, { silent: true, noScroll: true });
+            }
+        }
+    });
 });
