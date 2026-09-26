@@ -1482,7 +1482,10 @@ async function handleUserSubmit(event) {
         const { data, error } = await db.auth.signUp({
             email,
             password: senha,
-            options: { data: { nome, perfil } }     // vai para user_metadata (fallback)
+            options: {
+                data: { nome, perfil },             // vai para user_metadata (fallback)
+                emailRedirectTo: window.location.origin
+            }
         });
         if (error) return toast('Erro ao criar login: ' + error.message, 'erro');
 
