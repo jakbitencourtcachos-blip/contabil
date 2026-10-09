@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Anália | Sistema de Gerenciamento de Análise de Processos Contábeis</title>
+    <title>Vice Contabil | Sistema de Gerenciamento de Análise de Processos Contábeis</title>
 
     <!-- Tailwind CSS (mesma configuração do arquivo de referência "Sabor Express") -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -58,6 +58,26 @@
         @keyframes gradient-shift { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
         .animate-gradient { background-size: 200% 200%; animation: gradient-shift 3.5s ease infinite; }
 
+        /* Balança contábil animada (SVG do painel de login)
+           A travessa gira em torno do pivô e os pratos fazem a rotação inversa,
+           permanecendo sempre nivelados (física de uma balança real). */
+        @keyframes bal-sway      { 0%, 100% { transform: rotate(-13deg); } 50% { transform: rotate(13deg); } }
+        @keyframes bal-sway-inv  { 0%, 100% { transform: rotate(13deg);  } 50% { transform: rotate(-13deg); } }
+        @keyframes bal-coin      { 0%, 100% { transform: translateY(0);    } 50% { transform: translateY(-2.5px); } }
+        @keyframes bal-halo      { 0%, 100% { opacity: .40; transform: scale(.94); } 50% { opacity: .75; transform: scale(1.06); } }
+
+        .bal-beam,
+        .bal-pan { transform-box: view-box; animation-duration: 3s; animation-timing-function: ease-in-out; animation-iteration-count: infinite; }
+        .bal-beam     { transform-origin: 60px 16px; animation-name: bal-sway; }
+        .bal-pan--l   { transform-origin: 22px 16px; animation-name: bal-sway-inv; }
+        .bal-pan--r   { transform-origin: 98px 16px; animation-name: bal-sway-inv; }
+        .bal-coin     { transform-box: fill-box; transform-origin: center; animation: bal-coin 1.5s ease-in-out infinite; }
+        .bal-halo     { animation: bal-halo 3s ease-in-out infinite; }
+
+        @media (prefers-reduced-motion: reduce) {
+            .bal-beam, .bal-pan, .bal-coin, .bal-halo { animation: none !important; }
+        }
+
         /* Dropzone */
         .dropzone-drag { border-color: #7c3aed !important; background-color: rgba(124,58,237,.08); transform: scale(1.01); }
         .line-clamp-1 { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
@@ -89,11 +109,44 @@
         <div class="relative w-full max-w-md animate-fade-up">
             <!-- Marca -->
             <div class="flex flex-col items-center mb-6 text-center">
-                <div class="w-16 h-16 rounded-3xl bg-gradient-to-tr from-violet-600 to-indigo-500 flex items-center justify-center
-                            text-white shadow-2xl shadow-violet-500/40 mb-4">
-                    <i class="fa-solid fa-scale-balanced text-2xl"></i>
+                <!-- Marca: balança contábil animada em SVG -->
+                <div class="relative mb-4">
+                    <div class="bal-halo absolute -inset-3 rounded-[2rem] bg-gradient-to-tr from-violet-600/50 to-indigo-500/40 blur-xl"></div>
+                    <div class="relative w-16 h-16 rounded-3xl bg-gradient-to-tr from-violet-600 to-indigo-500 flex items-center justify-center
+                                text-white shadow-2xl shadow-violet-500/40">
+                        <svg viewBox="0 0 120 120" class="w-11 h-11" fill="none" xmlns="http://www.w3.org/2000/svg"
+                             role="img" aria-label="Balança contábil">
+                            <!-- Coluna e base -->
+                            <path d="M60 16V92" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+                            <path d="M54 88h12l9 13H45z" fill="currentColor"/>
+                            <path d="M43 105h34" stroke="currentColor" stroke-width="8" stroke-linecap="round"/>
+
+                            <!-- Travessa oscilante com os dois pratos -->
+                            <g class="bal-beam">
+                                <path d="M22 16h76" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+
+                                <!-- Prato esquerdo (rotação inversa = prato sempre nivelado) -->
+                                <g class="bal-pan bal-pan--l">
+                                    <path d="M22 16 7 39M22 16l15 23" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+                                    <path d="M7 39h30a15 15 0 0 1-30 0z" fill="currentColor"/>
+                                    <circle class="bal-coin" cx="22" cy="35" r="4.5" fill="#4c1d95"/>
+                                </g>
+
+                                <!-- Prato direito -->
+                                <g class="bal-pan bal-pan--r">
+                                    <path d="M98 16 83 39M98 16l15 23" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+                                    <path d="M83 39h30a15 15 0 0 1-30 0z" fill="currentColor"/>
+                                    <circle class="bal-coin" cx="98" cy="35" r="4.5" fill="#4c1d95"/>
+                                </g>
+
+                                <!-- Pivô -->
+                                <circle cx="60" cy="16" r="8" fill="currentColor"/>
+                                <circle cx="60" cy="16" r="3" fill="#4c1d95"/>
+                            </g>
+                        </svg>
+                    </div>
                 </div>
-                <span class="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-violet-600 to-indigo-500 bg-clip-text text-transparent">Anália</span>
+                <span class="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-violet-600 to-indigo-500 bg-clip-text text-transparent">Vice Contabil</span>
                 <span class="text-[11px] font-medium text-slate-500 dark:text-slate-400 tracking-[0.2em] uppercase mt-1">Análise de Processos Contábeis</span>
             </div>
 
@@ -150,12 +203,12 @@
                 <div class="mt-6 pt-5 border-t border-slate-200 dark:border-slate-800 text-center">
                     <p class="text-[11px] text-slate-400 dark:text-slate-500">
                         <i class="fa-solid fa-shield-halved mr-1"></i>
-                        Acesso restrito à equipe contábil. Sessão protegida pelo Supabase Auth.
+                        Acesso restrito à equipe contábil. Sessão protegida e criptografada.
                     </p>
                 </div>
             </div>
 
-            <p class="text-center text-[11px] text-slate-400 mt-6">&copy; 2026 Anália — Análise de Processos Contábeis</p>
+            <p class="text-center text-[11px] text-slate-400 mt-6">&copy; 2026 Vice Contabil — Análise de Processos Contábeis</p>
         </div>
     </div>
 
@@ -174,7 +227,7 @@
                         <i class="fa-solid fa-scale-balanced text-lg"></i>
                     </div>
                     <div>
-                        <span class="text-xl font-extrabold tracking-tight bg-gradient-to-r from-violet-600 to-indigo-500 bg-clip-text text-transparent">Anália</span>
+                        <span class="text-xl font-extrabold tracking-tight bg-gradient-to-r from-violet-600 to-indigo-500 bg-clip-text text-transparent">Vice Contabil</span>
                         <span class="text-[10px] block font-medium text-slate-400 tracking-widest uppercase">Processos Contábeis</span>
                     </div>
                 </a>
@@ -269,6 +322,9 @@
                             <span class="text-violet-600 dark:text-violet-400 font-semibold text-sm tracking-wider uppercase">Painel</span>
                             <h1 class="text-3xl font-extrabold text-slate-900 dark:text-white mt-1">
                                 Olá, <span id="dash-greeting" class="bg-gradient-to-r from-violet-600 to-indigo-500 bg-clip-text text-transparent">usuário</span>
+                                <span id="dash-access-badge"
+                                      class="hidden align-middle ml-3 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold">
+                                </span>
                             </h1>
                             <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Acompanhe os processos enviados para análise e baixe os arquivos Word gerados.</p>
                         </div>
@@ -336,29 +392,31 @@
                                                   focus:outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 transition-all">
                                 </div>
                             </div>
-                            <div>
-                                <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">Status</label>
-                                <select id="filter-status" onchange="renderProcessos()"
-                                        class="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5
-                                               text-xs text-slate-800 dark:text-white focus:outline-none focus:border-violet-500">
-                                    <option value="all">Todos os status</option>
-                                    <option value="concluido">Concluído</option>
-                                    <option value="processando">Processando</option>
-                                    <option value="rascunho">Rascunho</option>
-                                    <option value="erro">Com erro</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">De</label>
-                                <input type="date" id="filter-date-from" onchange="renderProcessos()"
-                                       class="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5
-                                              text-xs text-slate-800 dark:text-white focus:outline-none focus:border-violet-500">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">Até</label>
-                                <input type="date" id="filter-date-to" onchange="renderProcessos()"
-                                       class="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5
-                                              text-xs text-slate-800 dark:text-white focus:outline-none focus:border-violet-500">
+                            <div class="grid grid-cols-3 gap-2 lg:contents">
+                                <div class="min-w-0">
+                                    <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">Status</label>
+                                    <select id="filter-status" onchange="renderProcessos()"
+                                            class="w-full min-w-0 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2 sm:px-3 py-2.5
+                                                   text-xs text-slate-800 dark:text-white focus:outline-none focus:border-violet-500">
+                                        <option value="all">Todos os status</option>
+                                        <option value="concluido">Concluído</option>
+                                        <option value="processando">Processando</option>
+                                        <option value="rascunho">Rascunho</option>
+                                        <option value="erro">Com erro</option>
+                                    </select>
+                                </div>
+                                <div class="min-w-0">
+                                    <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">De</label>
+                                    <input type="date" id="filter-date-from" onchange="renderProcessos()"
+                                           class="w-full min-w-0 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2 sm:px-3 py-2.5
+                                                  text-xs text-slate-800 dark:text-white focus:outline-none focus:border-violet-500">
+                                </div>
+                                <div class="min-w-0">
+                                    <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">Até</label>
+                                    <input type="date" id="filter-date-to" onchange="renderProcessos()"
+                                           class="w-full min-w-0 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2 sm:px-3 py-2.5
+                                                  text-xs text-slate-800 dark:text-white focus:outline-none focus:border-violet-500">
+                                </div>
                             </div>
                             <button onclick="clearFilters()"
                                     class="px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300
@@ -385,7 +443,7 @@
                     <div class="mb-8">
                         <span class="text-violet-600 dark:text-violet-400 font-semibold text-sm tracking-wider uppercase">Análise</span>
                         <h1 class="text-3xl font-extrabold text-slate-900 dark:text-white mt-1">Novo Processo</h1>
-                        <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Preencha os dados, anexe o PDF e envie para o fluxo do n8n processar as bases contábeis.</p>
+                        <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Preencha os dados, anexe o PDF e envie para o Servidor de Análise processar as bases contábeis.</p>
                     </div>
 
                     <div class="grid lg:grid-cols-5 gap-6">
@@ -393,92 +451,20 @@
                         <form id="process-form" class="lg:col-span-3 p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm"
                               novalidate>
                             <div class="flex items-center gap-3 mb-6">
-                                <span class="w-10 h-10 rounded-xl bg-violet-50 dark:bg-violet-950/50 text-violet-600 dark:text-violet-400 flex items-center justify-center"><i class="fa-solid fa-id-card"></i></span>
+                                <span class="w-10 h-10 rounded-xl bg-violet-50 dark:bg-violet-950/50 text-violet-600 dark:text-violet-400 flex items-center justify-center"><i class="fa-solid fa-comment-dots"></i></span>
                                 <div>
-                                    <h2 class="font-bold text-slate-900 dark:text-white">Dados do cliente / empresa</h2>
-                                    <p class="text-xs text-slate-400">Campos com <span class="text-rose-500">*</span> são obrigatórios</p>
+                                    <h2 class="font-bold text-slate-900 dark:text-white">Observações</h2>
+                                    <p class="text-xs text-slate-400">Inclua orientações para o Servidor de Análise</p>
                                 </div>
                             </div>
 
-                            <div class="grid sm:grid-cols-2 gap-4">
-                                <div class="sm:col-span-2">
-                                    <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">Nome do cliente / empresa <span class="text-rose-500">*</span></label>
-                                    <input type="text" id="cliente" name="cliente" required placeholder="Ex.: Empresa XYZ Contabilidade Ltda"
-                                           class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm
-                                                  text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-violet-500
-                                                  focus:ring-2 focus:ring-violet-500/20 transition-all">
-                                </div>
-
-                                <div>
-                                    <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">CNPJ / CPF</label>
-                                    <input type="text" id="documento" name="documento" placeholder="00.000.000/0000-00"
-                                           class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm
-                                                  text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-violet-500
-                                                  focus:ring-2 focus:ring-violet-500/20 transition-all">
-                                </div>
-
-                                <div>
-                                    <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">Nº do processo / autos</label>
-                                    <input type="text" id="numero_processo" name="numero_processo" placeholder="1038851-48.2024.8.11.0041"
-                                           class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm
-                                                  text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-violet-500
-                                                  focus:ring-2 focus:ring-violet-500/20 transition-all">
-                                </div>
-
-                                <div>
-                                    <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">Órgão / Vara / Fórum</label>
-                                    <input type="text" id="orgao" name="orgao" placeholder="Vara Cível do Foro Central"
-                                           class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm
-                                                  text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-violet-500
-                                                  focus:ring-2 focus:ring-violet-500/20 transition-all">
-                                </div>
-
-                                <div>
-                                    <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">Competência / período</label>
-                                    <input type="text" id="periodo" name="periodo" placeholder="Ex.: 01/2024 a 12/2024"
-                                           class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm
-                                                  text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-violet-500
-                                                  focus:ring-2 focus:ring-violet-500/20 transition-all">
-                                </div>
-
-                                <div>
-                                    <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">Tipo de análise</label>
-                                    <select id="tipo_analise" name="tipo_analise"
-                                            class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm
-                                                   text-slate-800 dark:text-white focus:outline-none focus:border-violet-500">
-                                        <option>Balanço Patrimonial e DRE</option>
-                                        <option>Escrituração Fiscal</option>
-                                        <option>Apuração de Tributos</option>
-                                        <option>Revisão Contábil Judicial</option>
-                                        <option>Cálculo de Honorários / Perícia</option>
-                                        <option>Outro</option>
-                                    </select>
-                                </div>
-
-                                <div>
-                                    <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">E-mail para contato</label>
-                                    <input type="email" id="email" name="email" placeholder="cliente@empresa.com.br"
-                                           class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm
-                                                  text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-violet-500
-                                                  focus:ring-2 focus:ring-violet-500/20 transition-all">
-                                </div>
-
-                                <div>
-                                    <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">Telefone</label>
-                                    <input type="tel" id="telefone" name="telefone" placeholder="(00) 00000-0000"
-                                           class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm
-                                                  text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-violet-500
-                                                  focus:ring-2 focus:ring-violet-500/20 transition-all">
-                                </div>
-
-                                <div class="sm:col-span-2">
-                                    <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">Observações para o n8n</label>
+                            <div>
+                                    <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">Observações para o Servidor de Análise</label>
                                     <textarea id="observacoes" name="observacoes" rows="3"
                                               placeholder="Ex.: considerar apenas os exercícios de 2023 e 2024; destacar bases de cálculo de honorários."
                                               class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm
                                                      text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-violet-500
                                                      focus:ring-2 focus:ring-violet-500/20 transition-all resize-none"></textarea>
-                                </div>
                             </div>
 
                             <div class="mt-6 pt-5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
@@ -529,12 +515,12 @@
                                     </button>
                                 </div>
 
-                                <!-- Status do webhook -->
+                                <!-- Status do Servidor de Análise -->
                                 <div class="mt-5 flex items-center justify-between text-[11px]">
-                                    <span class="text-slate-400">Webhook n8n</span>
+                                    <span class="text-slate-400">Servidor de Análise</span>
                                     <span id="webhook-badge" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-bold
-                                                                  bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                                        <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span> Não configurado
+                                                                  bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span> Offline
                                     </span>
                                 </div>
 
@@ -544,12 +530,12 @@
                                                flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed">
                                     <i class="fa-solid fa-wand-magic-sparkles"></i> Enviar para Análise
                                 </button>
-                                <p class="text-[11px] text-slate-400 text-center mt-3">O PDF + formulário são enviados via <code class="text-violet-600 dark:text-violet-400">POST / FormData</code> ao fluxo do n8n.</p>
+                                <p class="text-[11px] text-slate-400 text-center mt-3">O PDF + formulário são enviados via <code class="text-violet-600 dark:text-violet-400">POST / FormData</code> ao Servidor de Análise.</p>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Painel de RESULTADO (após retorno do n8n) -->
+                    <!-- Painel de RESULTADO (após retorno do servidor) -->
                     <div id="result-panel" class="hidden mt-6 p-6 rounded-3xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-900/60 shadow-sm animate-fade-up">
                         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
                             <div class="flex items-center gap-3">
@@ -558,7 +544,7 @@
                                 </span>
                                 <div>
                                     <h3 class="font-extrabold text-slate-900 dark:text-white">Análise concluída</h3>
-                                    <p class="text-xs text-slate-500">O fluxo n8n devolveu o resumo e o arquivo Word pronto.</p>
+                                    <p class="text-xs text-slate-500">O Servidor de Análise devolveu o resumo e o arquivo Word pronto.</p>
                                 </div>
                             </div>
                             <div class="flex flex-wrap gap-3">
@@ -575,28 +561,20 @@
                             </div>
                         </div>
 
-                        <div class="grid md:grid-cols-2 gap-5">
-                            <div class="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-                                <h4 class="text-xs font-bold uppercase tracking-wide text-violet-600 dark:text-violet-400 mb-2">
-                                    <i class="fa-solid fa-align-left mr-1.5"></i>Resumo da análise
-                                </h4>
-                                <div id="result-resumo" class="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed max-h-72 overflow-y-auto">—</div>
-                            </div>
-                            <div class="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-                                <h4 class="text-xs font-bold uppercase tracking-wide text-violet-600 dark:text-violet-400 mb-2">
-                                    <i class="fa-solid fa-table-list mr-1.5"></i>Dados / bases calculadas
-                                </h4>
-                                <div id="result-dados" class="text-sm text-slate-700 dark:text-slate-300 max-h-72 overflow-y-auto">—</div>
-                            </div>
+                        <div class="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                            <h4 class="text-xs font-bold uppercase tracking-wide text-violet-600 dark:text-violet-400 mb-2">
+                                <i class="fa-solid fa-align-left mr-1.5"></i>Resumo da análise
+                            </h4>
+                            <div id="result-resumo" class="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto">—</div>
                         </div>
 
-                        <!-- Aviso quando o n8n responde sem entregar o arquivo -->
+                        <!-- Aviso quando o servidor responde sem entregar o arquivo -->
                         <div id="result-aviso" class="hidden mt-4 p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 text-xs font-semibold text-slate-700 dark:text-slate-300 leading-relaxed"></div>
 
-                        <!-- Resposta bruta do n8n (depuração) -->
+                        <!-- Resposta bruta do servidor (depuração) -->
                         <details id="result-raw" class="mt-4 group">
                             <summary class="cursor-pointer list-none text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-violet-600 dark:hover:text-violet-400 transition-colors select-none">
-                                <i class="fa-solid fa-code mr-1.5"></i>Resposta bruta do n8n (depuração)
+                                <i class="fa-solid fa-code mr-1.5"></i>Resposta bruta do servidor (depuração)
                                 <i class="fa-solid fa-chevron-down ml-1 text-[10px] transition-transform group-open:rotate-180"></i>
                             </summary>
                             <pre id="result-raw-json" class="mt-3 p-4 rounded-2xl bg-slate-950 text-emerald-300 text-[11px] leading-relaxed overflow-auto max-h-72 whitespace-pre-wrap border border-slate-800">—</pre>
@@ -604,7 +582,7 @@
 
                         <div id="result-saved" class="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2 text-[11px] text-slate-400">
                             <i class="fa-solid fa-cloud-arrow-up text-emerald-500"></i>
-                            <span>Processo e arquivo salvos no Supabase para consulta no Dashboard.</span>
+                            <span>Processo e arquivo salvos para consulta no Dashboard.</span>
                         </div>
                     </div>
                 </section>
@@ -720,9 +698,9 @@
                 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
                     <div class="flex items-center gap-2">
                         <span class="w-7 h-7 rounded-lg bg-violet-600 flex items-center justify-center text-white text-xs"><i class="fa-solid fa-scale-balanced"></i></span>
-                        <span class="text-sm font-bold text-white">Anália — Processos Contábeis</span>
+                        <span class="text-sm font-bold text-white">Vice Contabil — Processos Contábeis</span>
                     </div>
-                    <p class="text-xs text-slate-500">&copy; 2026 · Dados hospedados no Supabase · Análises processadas pelo n8n</p>
+                    <p class="text-xs text-slate-500">&copy; 2026 · Análises processadas com segurança</p>
                 </div>
             </footer>
         </main>
@@ -743,7 +721,7 @@
             </div>
 
             <h3 class="font-extrabold text-slate-900 dark:text-white text-lg">Processando...</h3>
-            <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Enviando o PDF para o fluxo do n8n</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Enviando o PDF para o Servidor de Análise</p>
 
             <div class="mt-6 space-y-2.5 text-left">
                 <div class="processing-step flex items-center gap-3 text-xs" data-step="0">
@@ -771,7 +749,7 @@
     </div>
 
     <!-- Modal: detalhes do processo -->
-    <div id="process-modal" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm hidden items-center justify-center p-4 overflow-y-auto">
+    <div id="process-modal" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm hidden items-start justify-center p-4 overflow-y-auto">
         <div class="bg-white dark:bg-slate-900 rounded-3xl max-w-3xl w-full p-6 sm:p-8 relative shadow-2xl border border-slate-200 dark:border-slate-800 my-8 transition-colors">
             <button onclick="closeProcessModal()" class="absolute top-6 right-6 p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
                 <i class="fa-solid fa-xmark"></i>
@@ -923,9 +901,9 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 
     <!-- Credenciais do Supabase (simulação do arquivo cred.sbase.txt) -->
-    <script src="config.js"></script>
+    <script src="config.js?v=20260926-1"></script>
 
     <!-- Lógica da aplicação -->
-    <script src="app.js?v=20260926-6"></script>
+    <script src="app.js?v=20260928-7"></script>
 </body>
 </html>

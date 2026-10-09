@@ -1,5 +1,5 @@
 /* =============================================================================
- * app.js  —  ANÁLIA | Sistema de Gerenciamento de Análise de Processos Contábeis
+ * app.js  —  VICE CONTABIL | Sistema de Gerenciamento de Análise de Processos Contábeis
  * -----------------------------------------------------------------------------
  * Responsabilidades:
  *   1. Inicialização do Supabase (credenciais vindas do `config.js`,
@@ -42,6 +42,27 @@ const BUCKET = 'processos';          // bucket do Supabase Storage (PDFs e DOCX)
 const CHAVE_WEBHOOK = 'webhook_n8n'; // chave da tabela `configuracoes`
 const PERFIL_ADMIN = 'admin';
 
+/* --- URL pública do sistema (produção) ------------------------------------
+ * Base usada nos links enviados por e-mail pelo Supabase (recuperação de senha
+ * e confirmação/convite). Evita que o e-mail aponte para http://localhost:3000
+ * quando o sistema é aberto em desenvolvimento.
+ *
+ * Valor definido em `config.js` (window.APP_BASE_URL); se não houver, o
+ * domínio de produção abaixo é usado como padrão.
+ *
+ * IMPORTANTE: o domínio precisa estar em Supabase > Authentication > URL
+ * Configuration (Site URL + Redirect URLs), senão o Supabase descarta o valor
+ * abaixo e usa o Site URL — que é como o localhost:3000 volta a aparecer.
+ * ------------------------------------------------------------------------ */
+const BASE_URL = String(window.APP_BASE_URL || 'https://contabil.jorgejfc.com.br')
+    .trim()
+    .replace(/\/+$/, '');
+
+/** URL de retorno enviada ao Supabase (raiz do sistema, com barra final). */
+function urlDeRetorno() {
+    return BASE_URL + '/';
+}
+
 /* --- Estado global da aplicação ------------------------------------------ */
 const state = {
     session: null,
@@ -70,11 +91,11 @@ let db = null;
 
 function initSupabase() {
     if (!window.supabase) {
-        toast('Biblioteca do Supabase não carregou (verifique a conexão).', 'erro');
+        toast('Não foi possível carregar a biblioteca de autenticação (verifique a conexão).', 'erro');
         return null;
     }
     if (!CRED.URL || !CRED.ANON_KEY) {
-        toast('Credenciais do Supabase ausentes. Preencha o config.js (cred.sbase.txt).', 'erro');
+        toast('Credenciais do sistema ausentes. Verifique o arquivo config.js.', 'erro');
         return null;
     }
     db = window.supabase.createClient(CRED.URL, CRED.ANON_KEY, {
@@ -173,7 +194,7 @@ async function requestPasswordRecovery() {
         if (!cadastrado) return showLoginError('E-mail não cadastrado.');
 
         const { error } = await db.auth.resetPasswordForEmail(email, {
-            redirectTo: window.location.origin
+            redirectTo: urlDeRetorno()
         });
         if (error) {
             const mensagem = (error.message || '').toLowerCase();
@@ -306,6 +327,7 @@ function paintUserInfo() {
     $('#menu-user-name').textContent = nome;
     $('#menu-user-email').textContent = email;
     $('#dash-greeting').textContent = nome.split(' ')[0];
+    paintAccessBadge();
 
     const role = $('#menu-user-role');
     role.textContent = state.isAdmin ? 'Administrador' : 'Usuário Padrão';
@@ -329,6 +351,62 @@ function paintUserInfo() {
     $('#nav-config').classList.toggle('hidden', !state.isAdmin);
     $('#nav-config-mobile').classList.toggle('hidden', !state.isAdmin);
     $('#menu-config-btn').classList.toggle('hidden', !state.isAdmin);
+}
+
+/**
+ * Badge exibido ao lado do "Olá, nome" no Dashboard:
+ *  - acesso por tempo  → data de expiração
+ *  - acesso por créditos → saldo disponível
+ */
+function paintAccessBadge() {
+    const badge = $('#dash-access-badge');
+    if (!badge) return;
+
+    const profile = state.profile;
+    const tipo = profile?.tipo_acesso;
+
+    // Administrador → identificação de acesso (não consome crédito nem expira)
+    if (state.isAdmin) {
+        setBadge(badge, 'fa-solid fa-shield-halved', 'Acesso administrativo',
+            'bg-violet-600 text-white');
+        return;
+    }
+
+    // Tipo de acesso sem configurar → sem badge
+    if (tipo !== 'tempo' && tipo !== 'creditos') {
+        badge.classList.add('hidden');
+        badge.innerHTML = '';
+        return;
+    }
+
+    let texto = '';
+    let estilo = '';
+    let icone = '';
+
+    if (tipo === 'tempo') {
+        const expira = profile.acesso_expira_em ? new Date(profile.acesso_expira_em) : null;
+        const dataValida = expira && !isNaN(expira.getTime());
+        texto = dataValida
+            ? `Acesso até ${expira.toLocaleDateString('pt-BR')}`
+            : 'Período não configurado';
+        icone = 'fa-solid fa-calendar-check';
+        estilo = 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300';
+    } else {
+        const saldo = Number(profile.creditos_saldo) || 0;
+        texto = `${saldo} crédito${saldo === 1 ? '' : 's'} disponível${saldo === 1 ? '' : 'is'}`;
+        icone = 'fa-solid fa-coins';
+        estilo = saldo > 0
+            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300'
+            : 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300';
+    }
+
+    setBadge(badge, icone, texto, estilo);
+}
+
+/** Preenche/posiciona o badge ao lado do "Olá, nome". */
+function setBadge(badge, icone, texto, estilo) {
+    badge.innerHTML = `<i class="${icone}"></i><span>${esc(texto)}</span>`;
+    badge.className = `align-middle ml-3 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${estilo}`;
 }
 
 /** Entra no painel (após login ou ao restaurar sessão). */
@@ -475,7 +553,7 @@ async function loadProcessos(silent) {
         console.warn('[processos]', error.message);
         state.processos = [];
         renderProcessos();
-        if (!silent) toast('Tabela `processos` indisponível — rode o schema.sql no Supabase.', 'erro');
+        if (!silent) toast('Tabela `processos` indisponível — execute o arquivo schema.sql no banco de dados.', 'erro');
         return;
     }
     state.processos = data || [];
@@ -532,6 +610,8 @@ function renderProcessos() {
 function processCard(p) {
     const st = STATUS[p.status] || STATUS.rascunho;
     const temWord = !!(p.docx_path || p.docx_base64 || p.docx_url || p.resposta);
+    const resultado = !p.numero_processo && p.resposta ? normalizeN8nResponse(p.resposta) : null;
+    const numeroProcesso = p.numero_processo || resultado?.dadosAnalise?.processo;
     return `
         <article class="group bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800
                         shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col">
@@ -542,8 +622,8 @@ function processCard(p) {
                         <i class="fa-solid fa-file-lines"></i>
                     </span>
                     <div class="min-w-0">
-                        <h3 class="font-bold text-slate-900 dark:text-white text-sm truncate">${esc(p.cliente) || 'Sem cliente'}</h3>
-                        <p class="text-[11px] text-slate-400 truncate">${esc(p.numero_processo) || 'Sem nº de processo'}</p>
+                        <h3 class="font-bold text-slate-900 dark:text-white text-sm truncate">${esc(numeroProcesso) || 'Sem nº de processo'}</h3>
+                        <p class="text-[11px] text-slate-400 truncate">Número do processo</p>
                     </div>
                 </div>
                 <span class="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wide ${st.cls}">
@@ -552,12 +632,10 @@ function processCard(p) {
             </div>
 
             <div class="mt-4 space-y-1.5 text-[11px] text-slate-500 dark:text-slate-400">
-                <p><i class="fa-solid fa-building w-4 text-slate-300 dark:text-slate-600"></i> ${esc(p.orgao) || '—'}</p>
-                <p><i class="fa-solid fa-scale-balanced w-4 text-slate-300 dark:text-slate-600"></i> ${esc(p.tipo_analise) || '—'}</p>
                 <p><i class="fa-solid fa-calendar w-4 text-slate-300 dark:text-slate-600"></i> ${fmtDate(p.created_at)}</p>
             </div>
 
-            <p class="mt-3 text-xs text-slate-600 dark:text-slate-400 line-clamp-3 flex-grow">${esc(p.resumo) || 'Sem resumo disponível ainda.'}</p>
+            <p class="mt-3 text-xs text-slate-600 dark:text-slate-400 line-clamp-3 flex-grow">${renderResumoHtml(p.resumo) || 'Sem resumo disponível ainda.'}</p>
 
             <div class="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2">
                 <button onclick="openProcessModal('${p.id}')"
@@ -604,10 +682,17 @@ function openProcessModal(id) {
     const p = state.processos.find(x => x.id === id);
     if (!p) return;
     const st = STATUS[p.status] || STATUS.rascunho;
+    const resultado = p.resposta ? normalizeN8nResponse(p.resposta, { processo: p.numero_processo }) : null;
+    const dadosAnalise = resultado?.dadosAnalise || {};
+    const processo = dadosAnalise.processo || p.numero_processo;
+    const autuacao = dadosAnalise.autuacao || '';
+    const citacao = dadosAnalise.citacao || '';
+    const verbasDeferidas = dadosAnalise.verbas_deferidas || '';
+    const indicesJuros = dadosAnalise.indices_juros || '';
 
     $('#process-modal-content').innerHTML = `
         <span class="text-xs font-semibold text-violet-600 dark:text-violet-400 uppercase tracking-wider">Processo salvo</span>
-        <h2 class="text-2xl font-extrabold text-slate-900 dark:text-white mt-1 pr-8">${esc(p.cliente) || 'Sem cliente'}</h2>
+        <h2 class="text-2xl font-extrabold text-slate-900 dark:text-white mt-1 pr-8">${esc(processo) || 'Sem nº de processo'}</h2>
         <div class="flex flex-wrap items-center gap-2 mt-2 text-xs text-slate-500">
             <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-bold ${st.cls}">
                 <i class="fa-solid ${st.icon}"></i>${st.label}
@@ -616,28 +701,21 @@ function openProcessModal(id) {
             ${p.numero_processo ? `<span>·</span><span>Nº ${esc(p.numero_processo)}</span>` : ''}
         </div>
 
-        <div class="grid sm:grid-cols-2 gap-4 mt-6">
-            ${infoBox('fa-id-card', 'Documento', p.documento)}
-            ${infoBox('fa-building', 'Órgão / Vara', p.orgao)}
-            ${infoBox('fa-balance-scale', 'Tipo de análise', p.tipo_analise)}
-            ${infoBox('fa-calendar-days', 'Competência', p.periodo)}
-            ${infoBox('fa-envelope', 'E-mail', p.email)}
-            ${infoBox('fa-phone', 'Telefone', p.telefone)}
+        <div class="grid gap-4 mt-6">
+            ${infoBox('fa-hashtag', 'Número do processo', processo)}
+            ${infoBox('fa-calendar-days', 'Data de autuação', autuacao)}
+            ${infoBox('fa-calendar-check', 'Data de citação', citacao)}
+            ${infoBox('fa-scale-balanced', 'Verbas deferidas', verbasDeferidas)}
+            ${infoBox('fa-percent', 'Índices de taxas e juros deferidos', indicesJuros)}
         </div>
 
         ${p.observacoes ? `<div class="mt-4 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
             <p class="text-[11px] font-bold uppercase tracking-wide text-violet-600 dark:text-violet-400 mb-1">Observações</p>
             <p class="text-sm text-slate-600 dark:text-slate-300">${esc(p.observacoes)}</p></div>` : ''}
 
-        <div class="grid md:grid-cols-2 gap-4 mt-4">
-            <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-                <p class="text-[11px] font-bold uppercase tracking-wide text-violet-600 dark:text-violet-400 mb-2">Resumo da análise</p>
-                <div class="text-sm text-slate-600 dark:text-slate-300 whitespace-pre-wrap max-h-64 overflow-y-auto">${esc(p.resumo) || '—'}</div>
-            </div>
-            <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-                <p class="text-[11px] font-bold uppercase tracking-wide text-violet-600 dark:text-violet-400 mb-2">Dados / bases</p>
-                <div class="text-sm text-slate-600 dark:text-slate-300 max-h-64 overflow-y-auto">${renderDados(p.resposta)}</div>
-            </div>
+        <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 mt-4">
+            <p class="text-[11px] font-bold uppercase tracking-wide text-violet-600 dark:text-violet-400 mb-2">Resumo da análise</p>
+            <div class="text-sm text-slate-600 dark:text-slate-300 whitespace-pre-wrap max-h-96 overflow-y-auto">${renderResumoHtml(p.resumo) || '—'}</div>
         </div>
 
         <div class="mt-6 pt-5 border-t border-slate-100 dark:border-slate-800 flex flex-wrap gap-3">
@@ -652,6 +730,7 @@ function openProcessModal(id) {
         </div>`;
 
     const modal = $('#process-modal');
+    modal.scrollTop = 0;
     modal.classList.remove('hidden');
     modal.classList.add('flex');
 }
@@ -663,14 +742,43 @@ function closeProcessModal() {
 }
 
 function infoBox(icon, label, value) {
+    const texto = value === null || value === undefined ? '' : String(value);
     return `<div class="p-4 rounded-2xl bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
         <p class="text-[11px] text-slate-400 flex items-center gap-1.5"><i class="fa-solid ${icon} text-violet-500"></i>${label}</p>
-        <p class="text-sm font-semibold text-slate-800 dark:text-slate-100 mt-1">${esc(value) || '—'}</p>
+        <div class="flex items-start gap-2 mt-1">
+            <p class="text-sm font-semibold text-slate-800 dark:text-slate-100 whitespace-pre-wrap break-words flex-1">${esc(texto) || '—'}</p>
+            <button type="button" onclick="copyInfo(this)" data-copy-value="${esc(texto)}"
+                    class="shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/40 transition-colors"
+                    title="Copiar informação" aria-label="Copiar ${esc(label)}">
+                <i class="fa-regular fa-copy"></i>
+            </button>
+        </div>
     </div>`;
 }
 
+async function copyInfo(button) {
+    const value = button?.dataset?.copyValue || '';
+    if (!value) return toast('Não há informação para copiar.', 'erro');
+    try {
+        await navigator.clipboard.writeText(value);
+    } catch (e) {
+        const area = document.createElement('textarea');
+        area.value = value;
+        area.style.position = 'fixed';
+        area.style.opacity = '0';
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand('copy');
+        area.remove();
+    }
+    const icon = button.querySelector('i');
+    if (icon) icon.className = 'fa-solid fa-check text-emerald-500';
+    toast('Informação copiada.');
+    setTimeout(() => { if (icon) icon.className = 'fa-regular fa-copy'; }, 1500);
+}
+
 async function deleteProcesso(id) {
-    if (!confirm('Excluir este processo do Supabase (incluindo os arquivos)?')) return;
+    if (!confirm('Excluir este processo (incluindo os arquivos)?')) return;
 
     const alvo = state.processos.find(p => p.id === id);
     const { error } = await db.from('processos').delete().eq('id', id);
@@ -784,7 +892,7 @@ async function sendForAnalysis() {
 
     const campos = {};
     ['cliente', 'documento', 'numero_processo', 'orgao', 'periodo', 'tipo_analise', 'email', 'telefone', 'observacoes']
-        .forEach(id => campos[id] = $('#' + id).value.trim());
+        .forEach(id => campos[id] = $('#' + id)?.value.trim() || '');
 
     const fd = new FormData();
     fd.append('arquivo', state.file, state.file.name);   // PDF binário
@@ -812,30 +920,42 @@ async function sendForAnalysis() {
     } catch (err) {
         falha = (err.name === 'AbortError')
             ? 'Envio cancelado pelo usuário.'
-            : ('Falha ao chamar o n8n: ' + err.message);
+            : ('Falha ao contactar o Servidor de Análise: ' + err.message);
         console.error('[n8n]', err);
     } finally {
         stopProcessing();
         $('#btn-send').disabled = false;
     }
 
-    const normalizado = resposta ? normalizeN8nResponse(resposta) : null;
+    const normalizado = resposta
+        ? normalizeN8nResponse(resposta, { processo: campos.numero_processo })
+        : null;
     state.lastResult = normalizado;
 
     if (falha) {
         toast(falha, 'erro');
         await saveProcesso({ status: 'erro', resumo: falha, resposta: null, campos });
+        // O PDF já terminou o ciclo de envio; não o mantenha selecionado no formulário.
+        clearFile();
         return;
     }
 
-    showResult(normalizado);
-    await saveProcesso({
+    const processoSalvo = await saveProcesso({
         status: 'concluido',
         resumo: normalizado.resumo,
         resposta: normalizado.dadosBrutos,
         campos
     });
-    toast('Análise concluída e salva no Supabase!');
+    // Libera imediatamente o arquivo do formulário após a conclusão da análise.
+    clearFile();
+
+    // O detalhe é a tela de consulta do processo salvo. Abre-a automaticamente
+    // em vez de deixar o usuário na tela de upload com o resultado embutido.
+    if (processoSalvo) {
+        navigate('dashboard');
+        openProcessModal(processoSalvo.id);
+    }
+    toast('Análise concluída e salva com sucesso!');
 }
 
 /** Lê a resposta do n8n: JSON, texto puro ou binário (próprio .docx). */
@@ -844,7 +964,7 @@ async function parseN8nResponse(response) {
 
     if (ct.includes('wordprocessingml') || ct.includes('msword') || ct.includes('octet-stream')) {
         const blob = await response.blob();
-        return { arquivo_base64: await blobToBase64(blob), resumo: 'Arquivo Word devolvido pelo n8n.' };
+        return { arquivo_base64: await blobToBase64(blob), resumo: 'Arquivo Word devolvido pelo Servidor de Análise.' };
     }
     if (ct.includes('json')) return await response.json();
 
@@ -1037,6 +1157,372 @@ function resumoAutomatico(itens) {
     return candidatos[0].valor;
 }
 
+/* >>> ORGANIZADOR-INICIO >>> */
+/* =============================================================================
+ * 8.1 ORGANIZAÇÃO DO RESULTADO (formato padrão exigido)
+ * -----------------------------------------------------------------------------
+ * O servidor de análise pode devolver campos estruturados ou texto corrido.
+ * Aqui o conteúdo é reorganizado no formato padronizado:
+ *
+ *   Processo: 1038851-48.2024.8.11.0041
+ *   Autuação: 02/09/2024
+ *   Citação: 30/10/2017
+ *
+ *   Direito reconhecido: pagamento do terço constitucional ...
+ *
+ *   Atualização do débito:
+ *
+ *   De 30/10/2017 a 30/11/2021: IPCA-E + juros da caderneta de poupança.
+ *   De 01/12/2021 em diante: somente SELIC.
+ * ======================================================================== */
+
+/** Rótulos reconhecidos dentro do texto devolvido pelo servidor. */
+const ROTULOS_RESUMO = [
+    ['processo',    /(?:^|\n)[ \t]*(?:n[úu]mero\s+(?:do\s+)?|n[º°]\s*)?processo(?:\s+n[º°])?[ \t]*[:\-–][ \t]*/i],
+    ['autuacao',    /(?:^|\n)[ \t]*autua[çc][ãa]o[ \t]*[:\-–][ \t]*/i],
+    ['citacao',     /(?:^|\n)[ \t]*cita[çc][ãa]o[ \t]*[:\-–][ \t]*/i],
+    ['direito',     /(?:^|\n)[ \t]*direitos?\s+reconhecidos?\s*[:\-–][ \t]*/i],
+    ['atualizacao', /(?:^|\n)[ \t]*atualiza[çc][ãa]o\s+(?:do\s+)?d[eé]bito\s*[:\-–][ \t]*/i]
+];
+
+/** Sinônimos de chave aceitos quando o servidor devolve campos estruturados. */
+const CAMPOS_RESUMO = {
+    processo: ['numero_processo', 'numero_do_processo', 'processo_numero', 'num_processo', 'numero_cnj', 'cnj', 'processo'],
+    autuacao: ['data_autuacao', 'autuacao', 'data_da_autuacao', 'data_de_autuacao', 'ajuizamento',
+               'data_ajuizamento', 'distribuicao', 'data_distribuicao', 'distribuida_em', 'autuada_em'],
+    citacao:  ['data_citacao', 'citacao', 'data_da_citacao', 'data_de_citacao', 'citado_em'],
+    verbas_deferidas: ['verbas_deferidas', 'verba_deferida', 'verbas_deferida', 'verbas'],
+    indices_juros: ['indices_juros', 'indices_de_juros', 'indices_taxas_juros', 'taxas_juros',
+                    'juros_deferidos', 'indices_e_juros'],
+    direito:  ['direito_reconhecido', 'direitos_reconhecidos', 'direito', 'tese_acolhida', 'tese_juridica',
+               'pedido_acolhido', 'dispositivo', 'fundamentacao', 'fundamento', 'conclusao'],
+    atualizacao: ['atualizacao_do_debito', 'atualizacao_debito', 'criterios_de_atualizacao',
+                  'criterios_atualizacao', 'criterio_de_atualizacao', 'criterio_atualizacao',
+                  'atualizacao_monetaria', 'juros_e_atualizacao', 'atualizacao']
+};
+
+/** Texto usado pelo fallback quando o servidor não manda resumo nenhum. */
+const RESUMO_PADRAO = 'Análise processada pelo Servidor de Análise.';
+
+/** Pedaços de data aceitos nas datas (10/2017, 30-10-2017, 2017-10-30...). */
+const RX_DATA = '(?:\\d{1,2}[\\/\\-.]\\d{1,2}[\\/\\-.]\\d{4}|\\d{4}-\\d{2}-\\d{2})';
+
+/** Minúsculas, sem acento e sem espaço — para comparar nomes de chave. */
+function chaveNormalizada(k) {
+    return String(k === null || k === undefined ? '' : k)
+        .toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+}
+
+/** Procura um texto pelos nomes de chave (exato primeiro, depois "contém"). */
+function campoFlexivel(itens, chaves) {
+    const norm = (itens || [])
+        .map(it => ({ k: chaveNormalizada(it.chave), v: String(it.valor === null || it.valor === undefined ? '' : it.valor).trim() }))
+        .filter(it => it.v && !/^(https?:|data:)/i.test(it.v));
+
+    for (const alvo of chaves) {
+        const exatos = norm.filter(it => it.k === alvo).map(it => it.v);
+        if (exatos.length) return [...new Set(exatos)].join('\n');
+    }
+    for (const alvo of chaves) {
+        const parcial = norm.find(it => it.k.includes(alvo));
+        if (parcial) return parcial.v;
+    }
+    return null;
+}
+
+/** Chave interna de um objeto simples (já normalizada). */
+function valorInterno(obj, chaves) {
+    if (!obj || typeof obj !== 'object') return null;
+    const alvos = chaves.map(chaveNormalizada);
+    for (const alvo of alvos) {
+        for (const [k, v] of Object.entries(obj)) {
+            if (chaveNormalizada(k) === alvo && v !== null && v !== undefined && v !== '') return v;
+        }
+    }
+    return null;
+}
+
+/** 2017-10-30 / 30.10.2017 -> 30/10/2017 (mantém o que não é data). */
+function normData(txt) {
+    const t = String(txt === null || txt === undefined ? '' : txt).trim();
+    let m = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+    m = t.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
+    if (m) return `${m[1].padStart(2, '0')}/${m[2].padStart(2, '0')}/${m[3]}`;
+    return t.replace(/\s+/g, ' ');
+}
+
+/** Padroniza o critério de atualização ("ipca-e + poupança" -> texto pronto). */
+function normalizarCriterio(txt) {
+    const t = String(txt === null || txt === undefined ? '' : txt)
+        .replace(/\s+/g, ' ').trim().replace(/[.;,]+$/, '').trim();
+    if (!t || t.length < 2) return '';
+
+    const temSelic     = /\bselic\b/i.test(t);
+    const temIpca      = /\bipca\b/i.test(t);
+    const temPoupanca  = /poupan[çc]a/i.test(t);
+    const temJuros     = /juros/i.test(t);
+    const temOutroInd  = /\bigp[\s-]?m\b|\binpc\b/i.test(t);
+
+    // Só a SELIC -> "somente SELIC"
+    if (temSelic && !temIpca && !temPoupanca && !temOutroInd) return 'somente SELIC';
+
+    // Mais de um critério no mesmo trecho -> preserva o texto original
+    if (temSelic && (temIpca || temPoupanca)) return t;
+
+    const ipcaE   = /\bIPCA[-–]?E\b/.test(t) || /\bIPCA\s+E\b/.test(t);
+    const temIpcaTok = /\bIPCA\b/i.test(t);
+    const indice = ipcaE ? 'IPCA-E'
+        : (temIpcaTok ? 'IPCA'
+        : (/\bIGP[\s-]?M\b/i.test(t) ? 'IGP-M'
+        : (/\bINPC\b/i.test(t) ? 'INPC' : '')));
+
+    const partes = [];
+    if (indice) partes.push(indice);
+    if (temPoupanca) partes.push('juros da caderneta de poupança');
+    else if (temJuros) {
+        const mj = t.match(/juros[^,;+]*/i);
+        if (mj) partes.push(mj[0].replace(/\s+/g, ' ').trim());
+    }
+
+    return partes.length ? partes.join(' + ') : t;
+}
+
+/** Monta uma linha "De 30/10/2017 a 30/11/2021: IPCA-E + ..." (ou null). */
+function montarPeriodo(segmento) {
+    const l = String(segmento === null || segmento === undefined ? '' : segmento)
+        .replace(/^[\s\-–•*·]+/, '').replace(/\s+/g, ' ').trim();
+    if (!l || !new RegExp(RX_DATA).test(l)) return null;
+
+    let m;
+    // De 30/10/2017 a 30/11/2021: criterio   |   30/10/2017 a 30/11/2021 - criterio
+    if ((m = l.match(new RegExp('^(?:de\\s+)?(' + RX_DATA + ')\\s+(?:a|at[ée])\\s+(' + RX_DATA + ')\\s*[:\\-–,]?\\s*(.+)$', 'i')))) {
+        const c = normalizarCriterio(m[3]);
+        return c ? `De ${normData(m[1])} a ${normData(m[2])}: ${c}.` : `De ${normData(m[1])} a ${normData(m[2])}.`;
+    }
+    // De 01/12/2021 em diante: criterio
+    if ((m = l.match(new RegExp('^(?:(?:a\\s+partir\\s+de|de|ap[óo]s)\\s+)?(' + RX_DATA + ')\\s+em\\s+diante\\s*[:\\-–,]?\\s*(.*)$', 'i')))) {
+        const c = normalizarCriterio(m[2]);
+        return c ? `De ${normData(m[1])} em diante: ${c}.` : `De ${normData(m[1])} em diante.`;
+    }
+    // criterio no período de 30/10/2017 a 30/11/2021
+    if ((m = l.match(new RegExp('^(.+?)\\s+no\\s+per[íi]odo\\s+(?:de|entre)\\s+(' + RX_DATA + ')\\s+(?:a|at[ée])\\s+(' + RX_DATA + ')\\s*[.;]?\\s*$', 'i')))) {
+        return `De ${normData(m[2])} a ${normData(m[3])}: ${normalizarCriterio(m[1])}.`;
+    }
+    // criterio de 30/10/2017 a 30/11/2021
+    if ((m = l.match(new RegExp('^(.+?)\\s+de\\s+(' + RX_DATA + ')\\s+(?:a|at[ée])\\s+(' + RX_DATA + ')\\s*[.;]?\\s*$', 'i')))) {
+        return `De ${normData(m[2])} a ${normData(m[3])}: ${normalizarCriterio(m[1])}.`;
+    }
+    // criterio de 01/12/2021 em diante  |  criterio a partir de 01/12/2021
+    if ((m = l.match(new RegExp('^(.+?)\\s+(?:(?:de|a\\s+partir\\s+de|ap[óo]s)\\s+)?(' + RX_DATA + ')\\s+em\\s+diante\\s*[:\\-–,]?\\s*(.*)$', 'i')))) {
+        const c = normalizarCriterio([m[1], m[3]].filter(Boolean).join(' '));
+        return c ? `De ${normData(m[2])} em diante: ${c}.` : `De ${normData(m[2])} em diante.`;
+    }
+    if ((m = l.match(new RegExp('^(.+?)\\s+(?:a\\s+partir\\s+de|ap[óo]s)\\s+(' + RX_DATA + ')\\s*[:\\-–,]?\\s*(.*)$', 'i')))) {
+        const c = normalizarCriterio([m[1], m[3]].filter(Boolean).join(' '));
+        return c ? `De ${normData(m[2])} em diante: ${c}.` : `De ${normData(m[2])} em diante.`;
+    }
+    // a partir de 01/12/2021: criterio
+    if ((m = l.match(new RegExp('^(?:a\\s+partir\\s+de|ap[óo]s|de)\\s+(' + RX_DATA + ')\\s*[:\\-–,]\\s*(.+)$', 'i')))) {
+        const c = normalizarCriterio(m[2]);
+        return c ? `De ${normData(m[1])} em diante: ${c}.` : `De ${normData(m[1])} em diante.`;
+    }
+    return null;
+}
+
+/** Quebra o texto em pedaços de frase (preserva datas como 30.10.2017). */
+function segmentarTexto(texto) {
+    return String(texto === null || texto === undefined ? '' : texto)
+        .split(/\n+/)
+        .flatMap(l => l.split(/(?<=;)(?=\s)/))   // ";" fica no pedaço da esquerda
+        .flatMap(l => l.split(/(?<=\.)(?=\s)/))  // "." final também
+        .map(s => s.trim())
+        .filter(Boolean);
+}
+
+/**
+ * Separa o texto em { texto, periodos }: tudo que for período de atualização
+ * vira linha pronta ("De X a Y: critério.") e o restante volta em `texto`.
+ */
+function extrairPeriodos(texto) {
+    const bruto = String(texto === null || texto === undefined ? '' : texto);
+    if (!bruto.trim()) return { texto: '', periodos: [] };
+
+    const periodos = [];
+    const sobras = [];
+    for (const pedaco of segmentarTexto(bruto)) {
+        const l = montarPeriodo(pedaco);
+        if (l) periodos.push(l);
+        else sobras.push(pedaco);
+    }
+    if (!periodos.length) return { texto: bruto.trim(), periodos: [] };
+
+    const separador = /\n/.test(bruto) ? '\n' : ' ';
+    return { texto: sobras.join(separador).replace(/\s*\n\s*/g, '\n').trim(), periodos };
+}
+
+/** Aceita o bloco de atualização como texto, lista ou lista de objetos. */
+function linhasDeAtualizacao(valor) {
+    if (valor === null || valor === undefined || valor === '') return [];
+
+    if (Array.isArray(valor)) return valor.flatMap(v => linhasDeAtualizacao(v)).filter(Boolean);
+
+    if (typeof valor === 'object') {
+        const periodo  = valorInterno(valor, ['periodo', 'periodo_aquisitivo', 'vigencia', 'intervalo', 'competencia']);
+        const inicio   = valorInterno(valor, ['data_inicio', 'inicio', 'inicial', 'data_inicial', 'de']);
+        const fim      = valorInterno(valor, ['data_fim', 'fim', 'final', 'data_final', 'ate', 'data_ate']);
+        const criterio = valorInterno(valor, ['criterio', 'criterio_de_atualizacao', 'indice', 'indexador', 'taxa', 'juros', 'descricao', 'texto', 'valor']);
+        let base = periodo ? String(periodo).trim()
+            : (inicio && fim ? `${normData(inicio)} a ${normData(fim)}`
+            : (inicio ? `${normData(inicio)} em diante` : ''));
+        const txt = [base, criterio].filter(Boolean).join(base && criterio ? ': ' : '');
+        const l = montarPeriodo(txt);
+        return l ? [l] : (txt ? [normalizarCriterio(txt) || txt] : []);
+    }
+
+    const texto = String(valor);
+    const ex = extrairPeriodos(texto);
+    if (ex.periodos.length) return ex.periodos;
+    const l = montarPeriodo(texto);
+    if (l) return [l];
+    return [texto.trim()].filter(Boolean);
+}
+
+/** Corta o texto pelos rótulos "Processo:", "Autuação:", "Citação:" etc. */
+function fatiarPorRotulos(texto) {
+    const bruto = String(texto === null || texto === undefined ? '' : texto);
+    const marcas = [];
+
+    for (const [campo, rx] of ROTULOS_RESUMO) {
+        const re = new RegExp(rx.source, 'gi');
+        let m;
+        while ((m = re.exec(bruto)) !== null) {
+            marcas.push({ inicio: m.index, fim: m.index + m[0].length, campo });
+            if (m[0].length === 0) re.lastIndex++;
+        }
+    }
+    marcas.sort((a, b) => a.inicio - b.inicio);
+
+    const saida = {};
+    const sobras = [];
+    let cursor = 0;
+
+    for (let i = 0; i < marcas.length; i++) {
+        const mk = marcas[i];
+        if (mk.inicio > cursor) sobras.push(bruto.slice(cursor, mk.inicio).trim());
+
+        const fim = (i + 1 < marcas.length) ? marcas[i + 1].inicio : bruto.length;
+        const valor = bruto.slice(mk.fim, fim).trim();
+        cursor = Math.max(cursor, fim);
+
+        if (!valor) continue;
+        if (!saida[mk.campo]) saida[mk.campo] = valor;
+        else sobras.push(valor);
+    }
+    if (cursor < bruto.length) sobras.push(bruto.slice(cursor).trim());
+
+    saida._sobras = sobras.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    return saida;
+}
+
+/** Monta o texto final no formato padronizado. */
+function montarResumo({ processo, autuacao, citacao, direito, periodos }) {
+    const cabecalho = [];
+    if (processo) cabecalho.push(`Processo: ${processo}`);
+    if (autuacao) cabecalho.push(`Autuação: ${autuacao}`);
+    if (citacao)  cabecalho.push(`Citação: ${citacao}`);
+
+    let out = cabecalho.join('\n');
+
+    const dir = String(direito === null || direito === undefined ? '' : direito)
+        .replace(/[ \t]+\n/g, '\n').trim();
+    if (dir) out += (out ? '\n\n' : '') + `Direito reconhecido: ${dir}`;
+
+    const linhas = (periodos || []).filter(Boolean);
+    if (linhas.length) out += (out ? '\n\n' : '') + 'Atualização do débito:\n\n' + linhas.join('\n');
+
+    return out.trim();
+}
+
+/**
+ * Reorganiza o retorno do n8n no formato padrão.
+ * @param {string} bruto   resumo/texto devolvido pelo servidor (pode ser null)
+ * @param {Array}  itens   pares {chave, valor} achados na resposta
+ * @param {*}      data    objeto já desembrulhado da resposta
+ * @param {Object} contexto { processo } — dados do formulário (fallback)
+ */
+function organizarResumo(bruto, itens, data, contexto) {
+    const texto = typeof bruto === 'string' ? bruto.trim() : '';
+    const lixo = new RegExp('^(' + RESUMO_PADRAO.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')$', 'i');
+    const textoUtil = (texto && !lixo.test(texto)) ? texto : '';
+
+    // 1) campos estruturados da resposta -----------------------------------
+    const campos = {};
+    const estruturados = new Set();
+    for (const [campo, chaves] of Object.entries(CAMPOS_RESUMO)) {
+        const v = campoFlexivel(itens, chaves);
+        if (v) { campos[campo] = v; estruturados.add(campo); }
+    }
+
+    // 2) rótulos escritos dentro do texto -----------------------------------
+    let rotulos = [];
+    let sobras = '';
+    if (textoUtil) {
+        const fatias = fatiarPorRotulos(textoUtil);
+        rotulos = Object.keys(fatias).filter(k => k !== '_sobras' && fatias[k]);
+        sobras = fatias._sobras || '';
+        rotulos.forEach(k => { if (!campos[k]) campos[k] = fatias[k]; });
+        if (!campos.direito && sobras) campos.direito = sobras;
+    }
+
+    // 3) bloco "Atualização do débito" (texto, lista ou lista de objetos) ---
+    let periodos = [];
+    if (campos.atualizacao) {
+        const ex = extrairPeriodos(campos.atualizacao);
+        periodos = ex.periodos.length ? ex.periodos : linhasDeAtualizacao(campos.atualizacao);
+    } else if (data) {
+        const val = acharValor(data, ['atualizacao_do_debito', 'atualizacao_debito', 'criterios_de_atualizacao',
+                                      'criterios_atualizacao', 'criterio_de_atualizacao', 'atualizacao_monetaria']);
+        if (val !== undefined) periodos = linhasDeAtualizacao(val);
+    }
+
+    // 4) períodos escondidos dentro do texto do "direito" -------------------
+    if (campos.direito) {
+        const ex = extrairPeriodos(campos.direito);
+        campos.direito = ex.texto;
+        ex.periodos.forEach(p => { if (!periodos.includes(p)) periodos.push(p); });
+    }
+
+    // 5) nº do processo vem do formulário quando o servidor não devolve -----
+    if (!campos.processo && contexto && contexto.processo) campos.processo = contexto.processo;
+    if (campos.processo) campos.processo = String(campos.processo).trim();
+
+    // Sem nenhuma estrutura reconhecida => devolve o texto original.
+    const temEstrutura = rotulos.length || estruturados.size || periodos.length ||
+        (campos.processo && campos.direito);
+    if (!temEstrutura) return textoUtil;
+
+    return montarResumo({
+        processo: campos.processo || '',
+        autuacao: campos.autuacao ? normData(campos.autuacao) : '',
+        citacao:  campos.citacao ? normData(campos.citacao) : '',
+        direito:  campos.direito || '',
+        periodos
+    }) || textoUtil;
+}
+
+/** Escape + rótulos do formato padrão em negrito (para exibir na tela). */
+function renderResumoHtml(texto) {
+    const t = esc(texto);
+    if (!t) return '';
+    return t.replace(/^(Processo|Autua[çc][ãa]o|Cita[çc][ãa]o|Direito reconhecido|Atualiza[çc][ãa]o do d[ée]bito):/gm,
+        '<strong class="text-slate-800 dark:text-white">$1:</strong>');
+}
+/* <<< ORGANIZADOR-FIM <<< */
+
 /** Mostra no painel o que sobrou da resposta (campos/bases calculadas). */
 function dadosFallback(data) {
     if (!data || typeof data !== 'object') return null;
@@ -1053,8 +1539,11 @@ function dadosFallback(data) {
 /**
  * Normaliza o retorno do n8n de qualquer formato para:
  *   { resumo, dados, base64, url, mime, nomeArquivo, chaves, dadosBrutos }
+ *
+ * `contexto` (opcional) traz dados do formulário — ex.: { processo: '123456-78...' }
+ * — usados como fallback quando o servidor não devolve o número do processo.
  */
-function normalizeN8nResponse(raw) {
+function normalizeN8nResponse(raw, contexto) {
     console.log('[n8n] resposta bruta:', raw);
 
     const data = unwrapPayload(raw);
@@ -1066,13 +1555,27 @@ function normalizeN8nResponse(raw) {
         'answer', 'resposta', 'conclusao', 'parecer', 'explicacao'
     ]) || resumoAutomatico(itens);
 
+    // >>> Resultado reorganizado no formato padrão (Processo / Autuação /
+    //     Citação / Direito reconhecido / Atualização do débito) <<<
+    const resumo = organizarResumo(resumoTxt, itens, data, contexto) || RESUMO_PADRAO;
+
+    // Campos exibidos diretamente na tela de detalhes. Eles são extraídos do
+    // JSON estruturado do n8n e continuam disponíveis após o processo ser salvo.
+    const dadosAnalise = {};
+    for (const campo of ['processo', 'autuacao', 'citacao', 'verbas_deferidas', 'indices_juros']) {
+        const valor = campoFlexivel(itens, CAMPOS_RESUMO[campo]);
+        if (valor) dadosAnalise[campo] = campo === 'autuacao' || campo === 'citacao' ? normData(valor) : valor;
+    }
+    if (!dadosAnalise.processo && contexto?.processo) dadosAnalise.processo = String(contexto.processo).trim();
+
     const dados = acharValor(data, ['dados', 'campos', 'valores', 'informacoes', 'calculos', 'bases', 'tabela', 'items', 'detalhes', 'resultados']);
 
     const arq = procurarArquivo(itens);
     const ext = (arq.ext || '.docx').replace('.', '');
 
     return {
-        resumo: resumoTxt || 'Análise processada pelo n8n.',
+        resumo,
+        dadosAnalise,
         dados: dados !== undefined ? dados : dadosFallback(data),
         dadosBrutos: data,
         base64: arq.base64 || null,
@@ -1083,28 +1586,9 @@ function normalizeN8nResponse(raw) {
     };
 }
 
-/** Renderiza os "dados/bases" devolvidos (tabela chave-valor ou lista). */
-function renderDados(dados) {
-    if (!dados) return '<span class="text-slate-400">—</span>';
-
-    if (Array.isArray(dados)) {
-        return `<ul class="space-y-1.5 text-sm list-disc list-inside">${dados.map(d =>
-            `<li>${esc(typeof d === 'object' ? JSON.stringify(d) : d)}</li>`).join('')}</ul>`;
-    }
-    if (typeof dados === 'string') return `<div class="whitespace-pre-wrap">${esc(dados)}</div>`;
-    if (typeof dados === 'object') {
-        return `<dl class="space-y-1.5">${Object.entries(dados).map(([k, v]) => `
-            <div class="flex items-start justify-between gap-3 text-xs">
-                <dt class="text-slate-500 dark:text-slate-400">${esc(k)}</dt>
-                <dd class="font-semibold text-slate-800 dark:text-slate-100 text-right">${esc(typeof v === 'object' ? JSON.stringify(v) : v)}</dd>
-            </div>`).join('')}</dl>`;
-    }
-    return String(dados);
-}
-
 function showResult(r) {
-    $('#result-resumo').textContent = r.resumo || '—';
-    $('#result-dados').innerHTML = renderDados(r.dados);
+    const alvo = $('#result-resumo');
+    alvo.innerHTML = renderResumoHtml(r.resumo) || '—';
     $('#result-saved').classList.add('hidden');
 
     // Resposta bruta (depuração) — mostra exatamente o que o n8n devolveu
@@ -1122,10 +1606,13 @@ function showResult(r) {
     if (aviso) {
         if (!r.base64 && !r.url) {
             aviso.classList.remove('hidden');
-            aviso.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-amber-500 mr-1.5"></i>
-                O n8n respondeu, mas não encontrei o arquivo na resposta. Chaves recebidas:
-                <code class="text-violet-600 dark:text-violet-400">${esc((r.chaves || []).join(', ') || '(objeto vazio)')}</code>.
-                Abra a "Resposta bruta" abaixo e me envie o conteúdo que eu ajusto a leitura.`;
+            const temCampos = Object.keys(r.dadosAnalise || {}).length > 0;
+            aviso.innerHTML = temCampos
+                ? `<i class="fa-solid fa-circle-check text-emerald-500 mr-1.5"></i>
+                   Dados da análise recebidos com sucesso. O n8n não retornou um arquivo Word nesta resposta.`
+                : `<i class="fa-solid fa-triangle-exclamation text-amber-500 mr-1.5"></i>
+                   O Servidor de Análise respondeu, mas não encontrei o arquivo na resposta. Chaves recebidas:
+                   <code class="text-violet-600 dark:text-violet-400">${esc((r.chaves || []).join(', ') || '(objeto vazio)')}</code>.`;
         } else {
             aviso.classList.add('hidden');
         }
@@ -1195,7 +1682,7 @@ function downloadWordFromResult() {
     if (r.base64) return downloadBase64Word(r.base64, r.nomeArquivo, r.mime);
     if (r.url) return openExternal(r.url, r.nomeArquivo);
 
-    toast(`O n8n respondeu mas não devolveu o arquivo. Chaves: ${(r.chaves || []).join(', ') || '(vazio)'}. Abra a resposta bruta e me envie.`, 'erro');
+    toast(`O Servidor de Análise respondeu mas não devolveu o arquivo. Chaves: ${(r.chaves || []).join(', ') || '(vazio)'}. Abra a resposta bruta e me envie.`, 'erro');
 }
 
 async function downloadWord(id) {
@@ -1281,7 +1768,7 @@ async function saveProcesso({ status, resumo, resposta, campos }) {
         user_id: state.session.user.id,
         cliente: campos.cliente,
         documento: campos.documento,
-        numero_processo: campos.numero_processo,
+        numero_processo: campos.numero_processo || state.lastResult?.dadosAnalise?.processo || '',
         orgao: campos.orgao,
         periodo: campos.periodo,
         tipo_analise: campos.tipo_analise,
@@ -1368,11 +1855,13 @@ function paintWebhookBadge() {
     const badge = $('#webhook-badge');
     if (!badge) return;
     if (state.webhookUrl) {
+        // Servidor de Análise disponível -> ponto VERDE "Online"
         badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400';
-        badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Configurado';
+        badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Online';
     } else {
-        badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-bold bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400';
-        badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span> Não configurado';
+        // Sem URL configurada -> ponto VERMELHO "Offline"
+        badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-bold bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400';
+        badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span> Offline';
     }
 }
 
@@ -1395,7 +1884,7 @@ async function saveWebhookUrl() {
         toast('URL salva localmente; a tabela `configuracoes` ainda não existe (rode o schema.sql).', 'erro');
         return;
     }
-    toast('URL do webhook do n8n salva no Supabase!');
+    toast('URL do webhook do n8n salva com sucesso!');
 }
 
 async function testWebhook() {
@@ -1584,7 +2073,7 @@ async function handleUserSubmit(event) {
             password: senha,
             options: {
                 data: { nome, perfil },             // vai para user_metadata (fallback)
-                emailRedirectTo: window.location.origin
+                emailRedirectTo: urlDeRetorno()
             }
         });
         if (error) return toast('Erro ao criar login: ' + error.message, 'erro');
@@ -1598,7 +2087,7 @@ async function handleUserSubmit(event) {
         });
         if (perfisError) {
             console.error('[perfis insert]', perfisError.message);
-            return toast('Login criado, mas o perfil/acesso não foi salvo. Execute a atualização do schema.sql e confira as permissões do Supabase.', 'erro');
+            return toast('Login criado, mas o perfil/acesso não foi salvo. Execute a atualização do schema.sql e confira as permissões do banco de dados.', 'erro');
         }
 
         toast('Usuário criado com sucesso!');
@@ -1646,7 +2135,7 @@ async function deleteUser(id) {
     if (error) return toast('Erro ao excluir: ' + error.message, 'erro');
 
     toast(removido
-        ? 'Usuário excluído do Supabase Auth.'
+        ? 'Usuário excluído com sucesso.'
         : 'Usuário inativado (para excluir o login, publique a Edge Function `admin-users`).');
     loadUsers();
 }

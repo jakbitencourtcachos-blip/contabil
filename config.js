@@ -25,3 +25,20 @@ window.CRED_SBASE = {
     // Chave pública (anon / publishable) -> linha "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
     ANON_KEY: 'sb_publishable_aY5RnxYh20ZEVxg4MkJv_A_0AtnbOSC'
 };
+
+/* =============================================================================
+ * URL PÚBLICA DO SISTEMA (PRODUÇÃO)
+ * -----------------------------------------------------------------------------
+ * Usada pelo app.js nos links enviados por e-mail pelo Supabase
+ * (recuperação de senha e confirmação/convite de cadastro), para que o e-mail
+ * SEMPRE aponte para o domínio real e nunca para http://localhost:3000.
+ *
+ * ⚠️ ESSE DOMÍNIO TAMBÉM PRECISA ESTAR CONFIGURADO NO SUPABASE:
+ *    Dashboard -> Authentication -> URL Configuration
+ *      Site URL      : https://contabil.jorgejfc.com.br
+ *      Redirect URLs : https://contabil.jorgejfc.com.br
+ *                      https://contabil.jorgejfc.com.br/**
+ *    (se o Site URL continuar como http://localhost:3000, o Supabase ignora o
+ *     redirect enviado pelo app e reescreve o link do e-mail como localhost)
+ * ============================================================================= */
+window.APP_BASE_URL = 'https://contabil.jorgejfc.com.br';

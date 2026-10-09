@@ -1,5 +1,5 @@
 -- =============================================================================
--- schema.sql — ANÁLIA | Sistema de Gerenciamento de Análise de Processos Contábeis
+-- schema.sql — VICE CONTABIL | Sistema de Gerenciamento de Análise de Processos Contábeis
 -- -----------------------------------------------------------------------------
 -- Execute ESTE ARQUIVO UMA ÚNICA VEZ no Supabase Studio > SQL Editor > New query.
 -- Ele cria as tabelas usadas pelo frontend (processos, perfis, configuracoes),
