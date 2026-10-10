@@ -1,0 +1,13 @@
+.git
+.gitignore
+node_modules
+npm-debug.log
+
+*.pdf
+cred.sbase.txt
+index.sabor-express.backup.html
+Documento de Jorge Fernando
+
+*.md
+Dockerfile
+.dockerignore
