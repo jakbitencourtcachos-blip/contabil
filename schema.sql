@@ -18,6 +18,7 @@ create table if not exists public.perfis (
     tipo_acesso text not null default 'creditos' check (tipo_acesso in ('creditos','tempo')),
     creditos_saldo integer not null default 0 check (creditos_saldo >= 0),
     acesso_expira_em timestamptz,
+    tema_preferido text check (tema_preferido in ('light','dark')),
     created_at timestamptz not null default now()
 );
 
@@ -26,6 +27,7 @@ create table if not exists public.perfis (
 alter table public.perfis add column if not exists tipo_acesso text not null default 'creditos';
 alter table public.perfis add column if not exists creditos_saldo integer not null default 0;
 alter table public.perfis add column if not exists acesso_expira_em timestamptz;
+alter table public.perfis add column if not exists tema_preferido text check (tema_preferido in ('light','dark'));
 do $$ begin
     alter table public.perfis add constraint perfis_tipo_acesso_check check (tipo_acesso in ('creditos','tempo'));
 exception when duplicate_object then null; end $$;

@@ -109,7 +109,7 @@ function initSupabase() {
 }
 
 /* =============================================================================
- * 3. TEMA (claro/escuro) — mesma lógica do arquivo de referência
+ * 3. TEMA (claro/escuro) — salva preferência no perfil do usuário (Supabase)
  * ======================================================================== */
 function applyInitialTheme() {
     const html = document.documentElement;
@@ -120,14 +120,52 @@ function applyInitialTheme() {
     }
 }
 
+async function saveThemePreference(theme) {
+    if (!db || !state.session?.user) return;
+    try {
+        await db.from('perfis').update({ tema_preferido: theme }).eq('id', state.session.user.id);
+    } catch (e) {
+        console.warn('[tema] Falha ao salvar preferência:', e.message);
+    }
+}
+
 function toggleTheme() {
     const html = document.documentElement;
+    let theme;
     if (html.classList.contains('dark')) {
         html.classList.remove('dark');
         localStorage.theme = 'light';
+        theme = 'light';
     } else {
         html.classList.add('dark');
         localStorage.theme = 'dark';
+        theme = 'dark';
+    }
+    saveThemePreference(theme);
+}
+
+async function loadThemeFromProfile() {
+    if (!db || !state.session?.user) return null;
+    try {
+        const { data, error } = await db.from('perfis').select('tema_preferido').eq('id', state.session.user.id).maybeSingle();
+        if (!error && data?.tema_preferido) {
+            return data.tema_preferido;
+        }
+    } catch (e) {
+        console.warn('[tema] Falha ao carregar preferência:', e.message);
+    }
+    return null;
+}
+
+async function applyThemeFromProfile() {
+    const theme = await loadThemeFromProfile();
+    const html = document.documentElement;
+    if (theme === 'dark') {
+        html.classList.add('dark');
+        localStorage.theme = 'dark';
+    } else if (theme === 'light') {
+        html.classList.remove('dark');
+        localStorage.theme = 'light';
     }
 }
 
@@ -413,6 +451,7 @@ function setBadge(badge, icone, texto, estilo) {
 async function enterApp(session) {
     state.session = session;
     await loadProfile(session.user);
+    await applyThemeFromProfile();
     const profile = state.profile;
     let bloqueio = '';
     if (!profile || profile.ativo !== true) bloqueio = 'Seu acesso está inativo ou não foi configurado pelo administrador.';
