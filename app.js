@@ -145,9 +145,11 @@ function toggleTheme() {
 }
 
 async function loadThemeFromProfile() {
-    if (!db || !state.session?.user) return null;
+    if (!db) return null;
     try {
-        const { data, error } = await db.from('perfis').select('tema_preferido').eq('id', state.session.user.id).maybeSingle();
+        const { data: { session } } = await db.auth.getSession();
+        if (!session?.user) return null;
+        const { data, error } = await db.from('perfis').select('tema_preferido').eq('id', session.user.id).maybeSingle();
         if (!error && data?.tema_preferido) {
             return data.tema_preferido;
         }
@@ -159,13 +161,11 @@ async function loadThemeFromProfile() {
 
 async function applyThemeFromProfile() {
     const theme = await loadThemeFromProfile();
-    const html = document.documentElement;
-    if (theme === 'dark') {
-        html.classList.add('dark');
-        localStorage.theme = 'dark';
-    } else if (theme === 'light') {
-        html.classList.remove('dark');
-        localStorage.theme = 'light';
+    if (theme) {
+        const html = document.documentElement;
+        if (theme === 'dark') html.classList.add('dark');
+        else html.classList.remove('dark');
+        localStorage.theme = theme;
     }
 }
 
@@ -2277,6 +2277,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     $('#theme-toggle-login')?.addEventListener('click', toggleTheme);
 
     if (!initSupabase()) return;
+
+    // Aplica o tema salvo no perfil antes de mostrar qualquer tela.
+    await applyThemeFromProfile();
 
     setupDropzone();
     $('#login-form').addEventListener('submit', handleLogin);
