@@ -70,6 +70,7 @@ const state = {
     isAdmin: false,
     screen: null,           // tela atualmente aberta (dashboard/novo/config)
     processos: [],
+    geralProcessos: [],
     users: [],
     webhookUrl: '',
     file: null,            // PDF selecionado na dropzone
@@ -385,10 +386,12 @@ function paintUserInfo() {
         accessInfo.textContent = '';
     }
 
-    // Só o Administrador vê as Configurações
+    // Só o Administrador vê as Configurações e Análises Gerais
     $('#nav-config').classList.toggle('hidden', !state.isAdmin);
     $('#nav-config-mobile').classList.toggle('hidden', !state.isAdmin);
     $('#menu-config-btn').classList.toggle('hidden', !state.isAdmin);
+    $('#nav-geral').classList.toggle('hidden', !state.isAdmin);
+    $('#nav-geral-mobile').classList.toggle('hidden', !state.isAdmin);
 }
 
 /**
@@ -470,10 +473,11 @@ async function enterApp(session) {
     showScreen('app');
     await Promise.all([loadWebhookUrl(), loadProcessos()]);
     if (state.isAdmin) await loadUsers();
+    if (state.isAdmin && telaSalva() === 'geral') await loadAllProcessos();
 }
 
 /** Telas do painel — usadas para restaurar a última página visitada. */
-const SCREENS = ['dashboard', 'novo', 'config'];
+const SCREENS = ['dashboard', 'novo', 'geral', 'config'];
 const SCREEN_KEY = 'analia:tela-atual';
 
 function showScreen(which) {
@@ -510,7 +514,7 @@ function navigate(screen, opts = {}) {
     if (!state.session && screen !== 'login') return showScreen('login');
 
     let redirecionada = false;
-    if (screen === 'config' && !state.isAdmin) {
+    if ((screen === 'config' || screen === 'geral') && !state.isAdmin) {
         toast('Área restrita ao Administrador.', 'erro');
         screen = 'dashboard';
         redirecionada = true;
@@ -543,6 +547,7 @@ function navigate(screen, opts = {}) {
     if (!opts.noScroll) window.scrollTo({ top: 0, behavior: 'smooth' });
 
     if (screen === 'dashboard') loadProcessos();
+    if (screen === 'geral' && state.isAdmin) loadAllProcessos();
     if (screen === 'config' && state.isAdmin) { loadWebhookUrl(); loadUsers(); }
 }
 
@@ -586,6 +591,7 @@ async function loadProcessos(silent) {
     const { data, error } = await db
         .from('processos')
         .select('*')
+        .eq('user_id', state.session.user.id)
         .order('created_at', { ascending: false });
 
     if (error) {
@@ -597,6 +603,160 @@ async function loadProcessos(silent) {
     }
     state.processos = data || [];
     renderProcessos();
+}
+
+/** Carrega TODAS as análises (apenas administrador — tela Análises Gerais). */
+async function loadAllProcessos(silent) {
+    if (!db || !state.isAdmin) return;
+    const { data, error } = await db
+        .from('processos')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+    if (error) {
+        console.warn('[processos geral]', error.message);
+        state.geralProcessos = [];
+        renderGeralProcessos();
+        if (!silent) toast('Tabela `processos` indisponível.', 'erro');
+        return;
+    }
+
+    // Enriquece com nome/e-mail do dono de cada processo
+    const userIds = [...new Set((data || []).map(p => p.user_id).filter(Boolean))];
+    const nomes = {};
+    if (userIds.length && state.users.length) {
+        userIds.forEach(id => {
+            const u = state.users.find(x => x.id === id);
+            if (u) nomes[id] = { nome: u.nome, email: u.email };
+        });
+    } else if (userIds.length) {
+        try {
+            const { data: perfis } = await db.from('perfis').select('id, nome, email').in('id', userIds);
+            (perfis || []).forEach(u => { nomes[u.id] = { nome: u.nome, email: u.email }; });
+        } catch (e) { /* silencioso */ }
+    }
+
+    state.geralProcessos = (data || []).map(p => ({
+        ...p,
+        _usuario_nome: nomes[p.user_id]?.nome || '',
+        _usuario_email: nomes[p.user_id]?.email || ''
+    }));
+    renderGeralProcessos();
+}
+
+function filteredGeralProcessos() {
+    const termo = ($('#geral-filter-search')?.value || '').trim().toLowerCase();
+    const status = $('#geral-filter-status')?.value || 'all';
+    const usuario = $('#geral-filter-usuario')?.value || 'all';
+    const de = $('#geral-filter-date-from')?.value;
+    const ate = $('#geral-filter-date-to')?.value;
+
+    return (state.geralProcessos || []).filter(p => {
+        const alvo = [p.cliente, p.documento, p.numero_processo, p.orgao, p.tipo_analise,
+                       p._usuario_nome, p._usuario_email]
+            .filter(Boolean).join(' ').toLowerCase();
+        if (termo && !alvo.includes(termo)) return false;
+        if (status !== 'all' && p.status !== status) return false;
+        if (usuario !== 'all' && p.user_id !== usuario) return false;
+
+        const dia = (p.created_at || '').slice(0, 10);
+        if (de && dia < de) return false;
+        if (ate && dia > ate) return false;
+        return true;
+    });
+}
+
+function renderGeralProcessos() {
+    const container = $('#geral-process-list');
+    if (!container) return;
+
+    // Preenche o filtro de usuários
+    const selectUsuario = $('#geral-filter-usuario');
+    if (selectUsuario && state.users.length) {
+        const atual = selectUsuario.value;
+        selectUsuario.innerHTML = '<option value="all">Todos os usuários</option>' +
+            state.users.map(u => `<option value="${u.id}">${esc(u.nome || u.email)}</option>`).join('');
+        selectUsuario.value = atual || 'all';
+    }
+
+    const list = filteredGeralProcessos();
+    $('#geral-process-count').textContent = list.length;
+    renderGeralStats();
+
+    if (!list.length) {
+        container.className = '';
+        container.innerHTML = `
+            <div class="col-span-full p-12 rounded-3xl bg-white dark:bg-slate-900 border border-dashed border-slate-300 dark:border-slate-700 text-center">
+                <div class="w-16 h-16 mx-auto rounded-2xl bg-violet-50 dark:bg-violet-950/40 text-violet-500 flex items-center justify-center text-xl mb-4">
+                    <i class="fa-solid fa-folder-open"></i>
+                </div>
+                <h3 class="font-bold text-slate-900 dark:text-white">Nenhuma análise encontrada</h3>
+                <p class="text-sm text-slate-500 mt-1">${(state.geralProcessos || []).length ? 'Ajuste os filtros acima.' : 'Nenhum usuário enviou análises ainda.'}</p>
+            </div>`;
+        return;
+    }
+
+    container.className = 'grid md:grid-cols-2 xl:grid-cols-3 gap-5';
+    container.innerHTML = list.map(geralProcessCard).join('');
+}
+
+function renderGeralStats() {
+    const list = state.geralProcessos || [];
+    $('#geral-stat-total').textContent = list.length;
+    $('#geral-stat-concluidos').textContent = list.filter(p => p.status === 'concluido').length;
+    $('#geral-stat-erros').textContent = list.filter(p => p.status === 'erro').length;
+    $('#geral-stat-usuarios').textContent = new Set(list.map(p => p.user_id).filter(Boolean)).size;
+}
+
+function geralProcessCard(p) {
+    const st = STATUS[p.status] || STATUS.rascunho;
+    const temWord = !!(p.docx_path || p.docx_base64 || p.docx_url || p.resposta);
+    const resultado = !p.numero_processo && p.resposta ? normalizeN8nResponse(p.resposta) : null;
+    const numeroProcesso = p.numero_processo || resultado?.dadosAnalise?.processo;
+    const usuarioLabel = p._usuario_nome || p._usuario_email || 'Desconhecido';
+    return `
+        <article class="group bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800
+                        shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col">
+            <div class="flex items-start justify-between gap-3">
+                <div class="flex items-center gap-3 min-w-0">
+                    <span class="w-11 h-11 shrink-0 rounded-2xl bg-gradient-to-tr from-violet-600 to-indigo-500 text-white
+                                 flex items-center justify-center shadow-lg shadow-violet-500/25">
+                        <i class="fa-solid fa-file-lines"></i>
+                    </span>
+                    <div class="min-w-0">
+                        <h3 class="font-bold text-slate-900 dark:text-white text-sm truncate">${esc(numeroProcesso) || 'Sem nº de processo'}</h3>
+                        <p class="text-[11px] text-slate-400 truncate">${esc(usuarioLabel)}</p>
+                    </div>
+                </div>
+                <span class="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wide ${st.cls}">
+                    <i class="fa-solid ${st.icon} ${p.status === 'processando' ? 'animate-spin' : ''}"></i>${st.label}
+                </span>
+            </div>
+
+            <div class="mt-4 space-y-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                <p><i class="fa-solid fa-calendar w-4 text-slate-300 dark:text-slate-600"></i> ${fmtDate(p.created_at)}</p>
+            </div>
+
+            <p class="mt-3 text-xs text-slate-600 dark:text-slate-400 line-clamp-3 flex-grow">${renderResumoHtml(p.resumo) || 'Sem resumo disponível ainda.'}</p>
+
+            <div class="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2">
+                <button onclick="openProcessModal('${p.id}')"
+                        class="flex-grow py-2.5 rounded-xl bg-violet-50 dark:bg-violet-950/50 text-violet-600 dark:text-violet-400
+                               hover:bg-violet-600 hover:text-white dark:hover:bg-violet-600 transition-all text-xs font-semibold">
+                    <i class="fa-solid fa-eye mr-1.5"></i>Detalhes
+                </button>
+                <button onclick="downloadWord('${p.id}')" ${temWord ? '' : 'disabled'}
+                        class="py-2.5 px-3 rounded-xl ${temWord ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200' : 'bg-slate-100 dark:bg-slate-800 text-slate-300 dark:text-slate-600 cursor-not-allowed opacity-60'}
+                               transition-all text-xs font-semibold" title="Baixar Word">
+                    <i class="fa-solid fa-file-word"></i>
+                </button>
+                <button onclick="deleteProcesso('${p.id}')"
+                        class="py-2.5 px-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 hover:bg-rose-50 hover:text-rose-500
+                               dark:hover:bg-rose-950/40 transition-all text-xs" title="Excluir">
+                    <i class="fa-solid fa-trash"></i>
+                </button>
+            </div>
+        </article>`;
 }
 
 function filteredProcessos() {
@@ -718,7 +878,7 @@ function clearFilters() {
 }
 
 function openProcessModal(id) {
-    const p = state.processos.find(x => x.id === id);
+    const p = state.processos.find(x => x.id === id) || (state.geralProcessos || []).find(x => x.id === id);
     if (!p) return;
     const st = STATUS[p.status] || STATUS.rascunho;
     const resultado = p.resposta ? normalizeN8nResponse(p.resposta, { processo: p.numero_processo }) : null;
@@ -819,7 +979,7 @@ async function copyInfo(button) {
 async function deleteProcesso(id) {
     if (!confirm('Excluir este processo (incluindo os arquivos)?')) return;
 
-    const alvo = state.processos.find(p => p.id === id);
+    const alvo = state.processos.find(p => p.id === id) || (state.geralProcessos || []).find(p => p.id === id);
     const { error } = await db.from('processos').delete().eq('id', id);
     if (error) return toast('Erro ao excluir: ' + error.message, 'erro');
 
@@ -831,6 +991,7 @@ async function deleteProcesso(id) {
     closeProcessModal();
     toast('Processo excluído.');
     loadProcessos(true);
+    if (state.isAdmin) loadAllProcessos(true);
 }
 
 /* =============================================================================
@@ -1725,7 +1886,7 @@ function downloadWordFromResult() {
 }
 
 async function downloadWord(id) {
-    const p = state.processos.find(x => x.id === id) || (state.lastResult ? null : null);
+    const p = state.processos.find(x => x.id === id) || (state.geralProcessos || []).find(x => x.id === id) || (state.lastResult ? null : null);
     if (!p) return downloadWordFromResult();
 
     // 1) Supabase Storage (URL assinada)
