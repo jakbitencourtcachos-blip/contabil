@@ -366,6 +366,12 @@ function paintUserInfo() {
     $('#menu-user-name').textContent = nome;
     $('#menu-user-email').textContent = email;
     $('#dash-greeting').textContent = nome.split(' ')[0];
+
+    const dashDate = $('#dash-date');
+    if (dashDate) {
+        dashDate.textContent = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+        dashDate.classList.remove('hidden');
+    }
     paintAccessBadge();
 
     const role = $('#menu-user-role');
